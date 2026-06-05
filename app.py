@@ -21,6 +21,54 @@ def load_exercise_data():
 df_food = load_food_data()
 df_exercise = load_exercise_data()
 
+# 单位转换映射
+UNIT_CONVERSION = {
+    'g': {'label': '克', 'default': 100, 'step': 50, 'min': 10, 'max': 1000},
+    'ml': {'label': '毫升', 'default': 250, 'step': 50, 'min': 50, 'max': 1000},
+    '个': {'label': '个', 'default': 1, 'step': 1, 'min': 1, 'max': 10},
+    '片': {'label': '片', 'default': 1, 'step': 1, 'min': 1, 'max': 8},
+    '块': {'label': '块', 'default': 1, 'step': 1, 'min': 1, 'max': 10},
+    '球': {'label': '球', 'default': 1, 'step': 1, 'min': 1, 'max': 5},
+    '碗': {'label': '碗', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
+    '杯': {'label': '杯', 'default': 1, 'step': 1, 'min': 1, 'max': 5},
+    '瓶': {'label': '瓶', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
+    '罐': {'label': '罐', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
+    '盘': {'label': '盘', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
+}
+
+def get_food_display(row, amount):
+    """根据单位计算实际热量"""
+    unit = row['单位'] if pd.notna(row['单位']) else 'g'
+    standard_qty = row['标准量'] if pd.notna(row['标准量']) else 100
+    
+    if unit == 'g' or unit == 'ml':
+        # 按重量/体积计算
+        multiplier = amount / standard_qty
+    else:
+        # 按个数/份数计算
+        multiplier = amount / standard_qty
+    
+    calories = row['热量'] * multiplier
+    protein = row['蛋白质'] * multiplier
+    return calories, protein, unit
+
+def get_quantity_input(row, default_qty=None):
+    """根据单位类型显示不同的输入控件"""
+    unit = row['单位'] if pd.notna(row['单位']) else 'g'
+    config = UNIT_CONVERSION.get(unit, UNIT_CONVERSION['g'])
+    
+    if default_qty is None:
+        default_qty = config['default']
+    
+    return st.number_input(
+        f"数量({config['label']})",
+        min_value=config['min'],
+        max_value=config['max'],
+        value=default_qty,
+        step=config['step'],
+        key=f"qty_{row['名称']}_{uuid.uuid4().hex[:4]}"
+    )
+
 def get_recognizer():
     api_key = os.environ.get("QWEN_API_KEY")
     if hasattr(st, 'secrets') and 'QWEN_API_KEY' in st.secrets:
@@ -96,21 +144,55 @@ with col_mid:
     meal = st.selectbox("餐次",["早餐","午餐","晚餐","加餐"])
     
     if mode == "🔍 手动":
-        s1,s2 = st.columns([3,1])
-        with s1: term = st.text_input("搜索", key="food_search", value=st.session_state.search_term)
-        with s2: wt = st.number_input("重量(g)",10,1000,st.session_state.search_weight,50, key="food_wt")
+        term = st.text_input("🔍 搜索食物", placeholder="红烧肉、伏特加、啤酒、奶茶...", key="food_search")
         if term:
-            st.session_state.search_term, st.session_state.search_weight = term, wt
-            results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
-            for _,row in results.iterrows():
-                cal, pro = row['热量']*wt/100, row['蛋白质']*wt/100
-                c1,c2,c3,c4 = st.columns([2,1,1,1])
-                c1.markdown(f"**{row['名称']}**"); c1.caption(row['类别'])
-                c2.write(f"{cal:.0f} kcal"); c3.write(f"蛋白质 {pro:.0f}g")
-                if c4.button("➕", key=f"add_{row['名称']}"):
-                    st.session_state.food_records.append({'时间':datetime.now().strftime("%H:%M"),'餐次':meal,'名称':row['名称'],'重量':wt,'热量':cal,'蛋白质':pro})
-                    st.session_state.total_calories += cal; st.session_state.total_protein += pro
+            results = df_food[df_food['名称'].str.contains(term, na=False)].head(10)
+            if len(results) == 0:
+                st.warning(f"未找到 '{term}'，试试：伏特加、朗姆酒、啤酒、红烧肉")
+            for _, row in results.iterrows():
+                unit = row['单位'] if pd.notna(row['单位']) else 'g'
+                config = UNIT_CONVERSION.get(unit, UNIT_CONVERSION['g'])
+                
+                # 显示食物信息
+                col1, col2, col3, col4 = st.columns([2, 1, 1.5, 1])
+                col1.markdown(f"**{row['名称']}**")
+                col1.caption(f"{row['类别']} | {config['label']}为单位")
+                col2.write(f"{row['热量']:.0f} kcal/{unit}")
+                
+                # 数量输入
+                qty = col3.number_input(
+                    f"数量({config['label']})",
+                    min_value=config['min'],
+                    max_value=config['max'],
+                    value=config['default'],
+                    step=config['step'],
+                    key=f"qty_{row['名称']}_{uuid.uuid4().hex[:4]}",
+                    label_visibility="collapsed"
+                )
+                
+                # 计算实际热量
+                standard_qty = row['标准量'] if pd.notna(row['标准量']) else 100
+                if unit in ['g', 'ml']:
+                    multiplier = qty / standard_qty
+                else:
+                    multiplier = qty / standard_qty
+                cal = row['热量'] * multiplier
+                pro = row['蛋白质'] * multiplier
+                
+                col4.write(f"{cal:.0f} kcal")
+                
+                if col4.button("➕", key=f"add_{row['名称']}_{uuid.uuid4().hex[:4]}", help=f"添加{row['名称']}"):
+                    st.session_state.food_records.append({
+                        '时间': datetime.now().strftime("%H:%M"), '餐次': meal,
+                        '名称': row['名称'], '数量': qty, '单位': unit,
+                        '热量': cal, '蛋白质': pro
+                    })
+                    st.session_state.total_calories += cal
+                    st.session_state.total_protein += pro
+                    st.success(f"✅ 已添加 {row['名称']} ({qty}{config['label']})")
                     st.rerun()
+                st.divider()
+    
     else:
         rec = get_recognizer()
         if rec:
@@ -121,10 +203,14 @@ with col_mid:
                 res = rec.recognize_food("/tmp/food.jpg")
                 if not res.get("error"):
                     for f in res.get("foods",[]):
-                        name, w2, cal, pro = f.get('name','未知'), f.get('weight',150), f.get('calories',225), f.get('protein',15)
-                        if st.button(f"➕ 添加 {name}"):
-                            st.session_state.food_records.append({'时间':datetime.now().strftime("%H:%M"),'餐次':meal,'名称':name,'重量':w2,'热量':cal,'蛋白质':pro})
-                            st.session_state.total_calories += cal; st.session_state.total_protein += pro
+                        name = f.get('name', '未知')
+                        w2 = f.get('weight', 150)
+                        cal = f.get('calories', 225)
+                        pro = f.get('protein', 15)
+                        if st.button(f"➕ 添加 {name} ({w2}g)"):
+                            st.session_state.food_records.append({'时间':datetime.now().strftime("%H:%M"),'餐次':meal,'名称':name,'数量':w2,'单位':'g','热量':cal,'蛋白质':pro})
+                            st.session_state.total_calories += cal
+                            st.session_state.total_protein += pro
                             st.rerun()
     
     st.markdown("### 📋 今日饮食")
@@ -133,7 +219,10 @@ with col_mid:
             items = [r for r in st.session_state.food_records if r['餐次']==m]
             if items:
                 st.markdown(f"**{m}**")
-                for r in items: st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['重量']}g | {r['热量']:.0f}kcal | 蛋白质 {r['蛋白质']:.0f}g")
+                for r in items:
+                    unit_display = r.get('单位', 'g')
+                    qty = r.get('数量', r.get('重量', 0))
+                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {qty}{unit_display} | {r['热量']:.0f}kcal")
     else: st.info("暂无")
 
 # 右侧：运动消耗
@@ -200,4 +289,4 @@ with col_right:
     else: st.info("暂无")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索90+种运动 | ✏️ 自定义 | 📸 拍照识别</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索90+种运动 | ✏️ 自定义 | 📸 拍照识别 | 🍺 酒水自动切换ml/杯单位</p>", unsafe_allow_html=True)
