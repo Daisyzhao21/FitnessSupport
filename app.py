@@ -54,7 +54,6 @@ df_exercise = load_exercise_data()
 # ==================== 初始化识别器 ====================
 def get_recognizer():
     api_key = os.environ.get("QWEN_API_KEY")
-    # 也支持从 secrets 读取
     if hasattr(st, 'secrets') and 'QWEN_API_KEY' in st.secrets:
         api_key = st.secrets['QWEN_API_KEY']
     if api_key:
@@ -123,13 +122,6 @@ st.markdown("""
         text-align: center;
         color: white;
     }
-    .food-card, .exercise-card {
-        background-color: white;
-        padding: 0.8rem;
-        border-radius: 10px;
-        margin-bottom: 0.5rem;
-        border-left: 4px solid #667eea;
-    }
     @media (max-width: 768px) {
         .stButton button { width: 100%; }
         .stTabs [data-baseweb="tab-list"] { gap: 8px; }
@@ -146,7 +138,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ==================== 三列布局 - 手机端自动适配 ====================
+# ==================== 三列布局 ====================
 col1, col2, col3 = st.columns([1, 1.5, 1.3], gap="medium")
 
 # ==================== 左侧：个人信息 + 总览 ====================
@@ -205,9 +197,15 @@ with col1:
     with col_b:
         st.metric("🏋️ 消耗", f"{st.session_state.total_burned:.0f} kcal")
     
+    # 修复 progress bar - 确保值在 [0,1] 范围内
+    if st.session_state.daily_target > 0:
+        progress_value = min(max((st.session_state.daily_target - remaining) / st.session_state.daily_target, 0.0), 1.0)
+    else:
+        progress_value = 0.0
+    
     if remaining > 0:
         st.success(f"✅ 剩余: {remaining:.0f} kcal")
-        st.progress(min((st.session_state.daily_target - remaining) / st.session_state.daily_target, 1.0))
+        st.progress(progress_value)
     else:
         st.error(f"⚠️ 超标: {-remaining:.0f} kcal")
         st.progress(1.0)
@@ -225,7 +223,7 @@ with col1:
 with col2:
     st.markdown("## 🍽️ 食物摄入")
     
-    # 餐次选择 - 使用独立的 session state
+    # 餐次选择
     meal_options = ["早餐", "午餐", "晚餐", "加餐"]
     current_meal_index = meal_options.index(st.session_state.current_meal) if st.session_state.current_meal in meal_options else 0
     
@@ -233,8 +231,7 @@ with col2:
         "餐次", 
         meal_options,
         index=current_meal_index,
-        key="meal_select",
-        on_change=lambda: setattr(st.session_state, 'current_meal', st.session_state.meal_select)
+        key="meal_select"
     )
     st.session_state.current_meal = selected_meal
     
@@ -262,10 +259,10 @@ with col2:
                 with c2:
                     st.write(f"{cal:.0f} kcal")
                 with c3:
-                    st.write(f"🥩 {pro:.0f}g")
+                    st.write(f"蛋白质 {pro:.0f}g")  # 改为文字
                 with c4:
                     button_key = f"food_{selected_meal}_{row['名称']}_{idx}_{uuid.uuid4().hex[:4]}"
-                    if st.button(f"➕", key=button_key):
+                    if st.button(f"➕ 添加", key=button_key):
                         st.session_state.total_calories += cal
                         st.session_state.total_protein += pro
                         st.session_state.food_records.append({
@@ -319,7 +316,7 @@ with col2:
                                 
                                 c1, c2 = st.columns([3, 1])
                                 with c1:
-                                    st.markdown(f"**{name}** - {fw}g, {cal:.0f}kcal")
+                                    st.markdown(f"**{name}** - {fw}g, {cal:.0f}kcal, 蛋白质{pro:.0f}g")
                                 with c2:
                                     vision_key = f"vision_{selected_meal}_{name}_{uuid.uuid4().hex[:4]}"
                                     if st.button(f"✅ 添加", key=vision_key):
@@ -334,7 +331,7 @@ with col2:
                                             '蛋白质': pro,
                                             '来源': '拍照'
                                         })
-                                        st.success(f"✅ 已添加 {name}")
+                                        st.success(f"✅ 已添加 {name} 到{selected_meal}")
                                         st.rerun()
                         os.remove(temp_path)
     
@@ -348,7 +345,7 @@ with col2:
             if meals:
                 st.markdown(f"**{m}**")
                 for r in meals[-10:]:
-                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['重量']}g | {r['热量']:.0f}kcal")
+                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['重量']}g | {r['热量']:.0f}kcal | 蛋白质 {r['蛋白质']:.0f}g")
     else:
         st.info("暂无记录")
 
@@ -363,7 +360,7 @@ with col3:
     if exercise_mode == "🔍 手动选择":
         exercise_name = st.selectbox("选择器材", df_exercise['器材'].tolist(), key="manual_exercise")
         selected = df_exercise[df_exercise['器材'] == exercise_name].iloc[0]
-        st.caption(f"💡 {selected['说明']} | 系数: {selected['消耗系数']} kcal/kg/min")
+        st.caption(f"💡 {selected['说明']} | 消耗系数: {selected['消耗系数']} kcal/kg/min")
         
         col_a, col_b, col_c = st.columns(3)
         with col_a:
@@ -444,7 +441,7 @@ with col3:
                                         '消耗': calories,
                                         '来源': '拍照'
                                     })
-                                    st.success(f"✅ 已记录")
+                                    st.success(f"✅ 已记录 {exercise_name} {duration}分钟")
                                     st.rerun()
                             else:
                                 st.warning("未找到匹配器材，请手动选择")
