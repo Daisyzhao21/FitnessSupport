@@ -40,7 +40,7 @@ def get_recognizer():
 def get_current_time():
     return datetime.now().strftime("%H:%M")
 
-# 初始化 Session State
+# 强制初始化所有 session state
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = {'gender': '男', 'weight': 70, 'height': 170, 'age': 25, 'activity_level': '中等', 'goal': '减脂'}
 if 'food_records' not in st.session_state:
@@ -48,11 +48,11 @@ if 'food_records' not in st.session_state:
 if 'exercise_records' not in st.session_state:
     st.session_state.exercise_records = []
 if 'total_calories' not in st.session_state:
-    st.session_state.total_calories = 0
+    st.session_state.total_calories = 0.0
 if 'total_protein' not in st.session_state:
-    st.session_state.total_protein = 0
+    st.session_state.total_protein = 0.0
 if 'total_burned' not in st.session_state:
-    st.session_state.total_burned = 0
+    st.session_state.total_burned = 0.0
 if 'bmr' not in st.session_state:
     st.session_state.bmr = 1600
 if 'daily_target' not in st.session_state:
@@ -136,14 +136,18 @@ with col_left:
     if st.button("🗑️ 清空记录"):
         st.session_state.food_records = []
         st.session_state.exercise_records = []
-        st.session_state.total_calories = 0
-        st.session_state.total_protein = 0
-        st.session_state.total_burned = 0
+        st.session_state.total_calories = 0.0
+        st.session_state.total_protein = 0.0
+        st.session_state.total_burned = 0.0
         st.rerun()
 
 # ==================== 中间：食物摄入 ====================
 with col_mid:
     st.markdown("## 🍽️ 食物摄入")
+    
+    # 调试信息 - 显示当前记录数量
+    st.caption(f"📊 当前食物记录数: {len(st.session_state.food_records)}")
+    
     mode = st.radio("方式", ["🔍 手动", "📸 拍照"], horizontal=True)
     meal = st.selectbox("餐次", ["早餐", "午餐", "晚餐", "加餐"])
     st.caption(f"🕐 {get_current_time()}")
@@ -176,10 +180,16 @@ with col_mid:
                 pro = row['蛋白质'] * multiplier
                 cols[3].write(f"{cal:.0f}")
                 
+                # 使用 form 来避免按钮状态问题
                 if cols[3].button("➕", key=f"add_{row['名称']}_{uuid.uuid4().hex[:4]}"):
                     st.session_state.food_records.append({
-                        '时间': get_current_time(), '餐次': meal, '名称': row['名称'],
-                        '数量': qty, '单位': unit, '热量': cal, '蛋白质': pro
+                        '时间': get_current_time(),
+                        '餐次': meal,
+                        '名称': row['名称'],
+                        '数量': qty,
+                        '单位': unit,
+                        '热量': cal,
+                        '蛋白质': pro
                     })
                     st.session_state.total_calories += cal
                     st.session_state.total_protein += pro
@@ -203,18 +213,25 @@ with col_mid:
                         pro = f.get('protein', weight * 0.15)
                         if st.button(f"➕ 添加 {name}"):
                             st.session_state.food_records.append({
-                                '时间': get_current_time(), '餐次': meal, '名称': name,
-                                '数量': weight, '单位': 'g', '热量': cal, '蛋白质': pro
+                                '时间': get_current_time(),
+                                '餐次': meal,
+                                '名称': name,
+                                '数量': weight,
+                                '单位': 'g',
+                                '热量': cal,
+                                '蛋白质': pro
                             })
                             st.session_state.total_calories += cal
                             st.session_state.total_protein += pro
                             st.success(f"✅ 已添加 {name}")
                             st.rerun()
     
-    # 显示记录
+    # 显示今日饮食记录
     st.markdown("---")
     st.markdown("### 📋 今日饮食")
+    
     if len(st.session_state.food_records) > 0:
+        # 按餐次分组显示
         for m in ["早餐", "午餐", "晚餐", "加餐"]:
             items = [r for r in st.session_state.food_records if r.get('餐次') == m]
             if items:
@@ -222,9 +239,9 @@ with col_mid:
                 for r in items:
                     unit = r.get('单位', 'g')
                     label = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])['label']
-                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['数量']}{label} | {r['热量']:.0f}kcal")
+                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['数量']}{label} | {r['热量']:.0f}kcal | 蛋白质 {r.get('蛋白质', 0):.0f}g")
     else:
-        st.info("暂无记录")
+        st.info("暂无记录，请搜索添加食物")
 
 # ==================== 右侧：运动消耗 ====================
 with col_right:
@@ -247,10 +264,14 @@ with col_right:
         st.info(f"🔥 {cal:.0f} kcal")
         if st.button("✅ 记录"):
             st.session_state.exercise_records.append({
-                '时间': get_current_time(), '器材': ex_name, '时长': dur, '负重': extra, '消耗': cal
+                '时间': get_current_time(),
+                '器材': ex_name,
+                '时长': dur,
+                '负重': extra,
+                '消耗': cal
             })
             st.session_state.total_burned += cal
-            st.success(f"✅ 已记录")
+            st.success(f"✅ 已记录 {ex_name}")
             st.rerun()
     
     elif mode_ex == "✏️ 自定义":
@@ -263,10 +284,14 @@ with col_right:
             st.info(f"🔥 {cal:.0f} kcal")
             if st.button("✅ 记录"):
                 st.session_state.exercise_records.append({
-                    '时间': get_current_time(), '器材': name, '时长': dur, '负重': extra, '消耗': cal
+                    '时间': get_current_time(),
+                    '器材': name,
+                    '时长': dur,
+                    '负重': extra,
+                    '消耗': cal
                 })
                 st.session_state.total_burned += cal
-                st.success(f"✅ 已记录")
+                st.success(f"✅ 已记录 {name}")
                 st.rerun()
     
     else:
@@ -285,7 +310,11 @@ with col_right:
                     if st.button("记录"):
                         cal = 0.08 * (st.session_state.user_profile['weight'] + extra) * dur
                         st.session_state.exercise_records.append({
-                            '时间': get_current_time(), '器材': name, '时长': dur, '负重': extra, '消耗': cal
+                            '时间': get_current_time(),
+                            '器材': name,
+                            '时长': dur,
+                            '负重': extra,
+                            '消耗': cal
                         })
                         st.session_state.total_burned += cal
                         st.success("✅ 已记录")
@@ -299,7 +328,7 @@ with col_right:
         for r in st.session_state.exercise_records[-15:]:
             st.write(f"  🕐 {r['时间']} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
     else:
-        st.info("暂无")
+        st.info("暂无运动记录")
 
 st.markdown("---")
 st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 🕐 自动时间</p>", unsafe_allow_html=True)
