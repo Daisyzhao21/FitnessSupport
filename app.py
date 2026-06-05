@@ -167,7 +167,7 @@ with col_mid:
                 qty = cols[2].number_input(
                     config['label'], 
                     config['min'], config['max'], config['default'], config['step'],
-                    key=f"qty_{row['名称']}_{uuid.uuid4().hex[:4]}",
+                    key=f"qty_{row['名称']}",
                     label_visibility="collapsed"
                 )
                 
@@ -176,9 +176,9 @@ with col_mid:
                 pro = row['蛋白质'] * multiplier
                 cols[3].write(f"{cal:.0f}")
                 
-                if cols[3].button("➕", key=f"add_{row['名称']}_{uuid.uuid4().hex[:4]}"):
-                    # 创建新记录
-                    new_record = {
+                # 关键修复：使用固定的按钮 key（基于食物名称）
+                if cols[3].button("➕", key=f"add_{row['名称']}"):
+                    st.session_state.food_records.append({
                         '时间': get_current_time(),
                         '餐次': meal,
                         '名称': row['名称'],
@@ -186,10 +186,7 @@ with col_mid:
                         '单位': unit,
                         '热量': cal,
                         '蛋白质': pro
-                    }
-                    # 添加到列表
-                    st.session_state.food_records.append(new_record)
-                    # 更新总计
+                    })
                     st.session_state.total_calories += cal
                     st.session_state.total_protein += pro
                     st.success(f"✅ 已添加 {row['名称']}")
@@ -225,15 +222,11 @@ with col_mid:
                             st.success(f"✅ 已添加 {name}")
                             st.rerun()
     
-    # 显示今日饮食记录 - 修复的关键部分
+    # 显示今日饮食记录
     st.markdown("---")
     st.markdown("### 📋 今日饮食")
     
-    # 直接检查 st.session_state.food_records 的长度
-    record_count = len(st.session_state.food_records)
-    
-    if record_count > 0:
-        # 按餐次分组显示
+    if len(st.session_state.food_records) > 0:
         for m in ["早餐", "午餐", "晚餐", "加餐"]:
             items = [r for r in st.session_state.food_records if r.get('餐次') == m]
             if items:
