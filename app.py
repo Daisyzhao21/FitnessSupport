@@ -40,22 +40,16 @@ def get_recognizer():
 def get_current_time():
     return datetime.now().strftime("%H:%M")
 
-# 初始化 Session State
-if 'user_profile' not in st.session_state:
+# 初始化 Session State - 使用更可靠的方式
+if 'initialized' not in st.session_state:
+    st.session_state.initialized = True
     st.session_state.user_profile = {'gender': '男', 'weight': 70, 'height': 170, 'age': 25, 'activity_level': '中等', 'goal': '减脂'}
-if 'food_records' not in st.session_state:
     st.session_state.food_records = []
-if 'exercise_records' not in st.session_state:
     st.session_state.exercise_records = []
-if 'total_calories' not in st.session_state:
-    st.session_state.total_calories = 0
-if 'total_protein' not in st.session_state:
-    st.session_state.total_protein = 0
-if 'total_burned' not in st.session_state:
-    st.session_state.total_burned = 0
-if 'bmr' not in st.session_state:
+    st.session_state.total_calories = 0.0
+    st.session_state.total_protein = 0.0
+    st.session_state.total_burned = 0.0
     st.session_state.bmr = 1600
-if 'daily_target' not in st.session_state:
     st.session_state.daily_target = 2000
 
 # 计算 BMR
@@ -91,7 +85,6 @@ st.markdown("""
 }
 @media (max-width: 768px) {
     .stButton button { width: 100%; }
-    .stColumns { gap: 0.3rem; }
 }
 </style>
 <div class="main-header">
@@ -137,9 +130,9 @@ with col_left:
     if st.button("🗑️ 清空记录"):
         st.session_state.food_records = []
         st.session_state.exercise_records = []
-        st.session_state.total_calories = 0
-        st.session_state.total_protein = 0
-        st.session_state.total_burned = 0
+        st.session_state.total_calories = 0.0
+        st.session_state.total_protein = 0.0
+        st.session_state.total_burned = 0.0
         st.rerun()
 
 # ==================== 中间：食物摄入 ====================
@@ -147,52 +140,62 @@ with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动", "📸 拍照"], horizontal=True)
     meal = st.selectbox("餐次", ["早餐", "午餐", "晚餐", "加餐"])
-    st.caption(f"🕐 {get_current_time()}")
+    st.caption(f"🕐 当前时间: {get_current_time()}")
     
     if mode == "🔍 手动":
         term = st.text_input("🔍 搜索食物", placeholder="红烧肉、啤酒、奶茶...")
         if term:
             results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
             if len(results) == 0:
-                st.warning("未找到")
+                st.warning("未找到该食物")
             for _, row in results.iterrows():
                 unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
                 config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
                 std_qty = row.get('标准量', 100) if pd.notna(row.get('标准量')) else 100
                 
-                cols = st.columns([2, 0.8, 1.2, 0.8])
-                cols[0].markdown(f"**{row['名称']}**")
-                cols[0].caption(row['类别'])
-                cols[1].write(f"{row['热量']:.0f}")
-                
-                qty = cols[2].number_input(
-                    config['label'], 
-                    config['min'], config['max'], config['default'], config['step'],
-                    key=f"qty_{row['名称']}_{uuid.uuid4().hex[:4]}",
-                    label_visibility="collapsed"
-                )
-                
-                multiplier = qty / std_qty
-                cal = row['热量'] * multiplier
-                pro = row['蛋白质'] * multiplier
-                cols[3].write(f"{cal:.0f}")
-                
-                if cols[3].button("➕", key=f"add_{row['名称']}_{uuid.uuid4().hex[:4]}"):
-                    st.session_state.food_records.append({
-                        '时间': get_current_time(), '餐次': meal, '名称': row['名称'],
-                        '数量': qty, '单位': unit, '热量': cal, '蛋白质': pro
-                    })
-                    st.session_state.total_calories += cal
-                    st.session_state.total_protein += pro
-                    st.success(f"✅ 已添加 {row['名称']}")
-                    st.rerun()
-                st.divider()
+                # 使用 expander 让界面更简洁
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([2, 0.8, 1.2, 0.8])
+                    col1.markdown(f"**{row['名称']}**")
+                    col1.caption(row['类别'])
+                    col2.write(f"{row['热量']:.0f} kcal/{unit}")
+                    
+                    qty = col3.number_input(
+                        f"数量({config['label']})",
+                        min_value=config['min'],
+                        max_value=config['max'],
+                        value=config['default'],
+                        step=config['step'],
+                        key=f"qty_{row['名称']}_{uuid.uuid4().hex[:4]}",
+                        label_visibility="collapsed"
+                    )
+                    
+                    multiplier = qty / std_qty
+                    cal = row['热量'] * multiplier
+                    pro = row['蛋白质'] * multiplier
+                    col4.write(f"{cal:.0f} kcal")
+                    
+                    if col4.button("➕ 添加", key=f"add_{row['名称']}_{uuid.uuid4().hex[:4]}"):
+                        st.session_state.food_records.append({
+                            '时间': get_current_time(),
+                            '餐次': meal,
+                            '名称': row['名称'],
+                            '数量': qty,
+                            '单位': unit,
+                            '热量': cal,
+                            '蛋白质': pro
+                        })
+                        st.session_state.total_calories += cal
+                        st.session_state.total_protein += pro
+                        st.success(f"✅ 已添加 {row['名称']} {qty}{config['label']}")
+                        st.rerun()
+                    st.divider()
     
     else:
         recognizer = get_recognizer()
         if recognizer:
             img = st.camera_input("拍照") or st.file_uploader("图片", type=['jpg', 'png'])
-            if img and st.button("识别"):
+            if img and st.button("识别食物"):
                 img = Image.open(img)
                 img.save("/tmp/food.jpg")
                 res = recognizer.recognize_food("/tmp/food.jpg")
@@ -202,19 +205,28 @@ with col_mid:
                         weight = f.get('weight', 150)
                         cal = f.get('calories', weight * 1.5)
                         pro = f.get('protein', weight * 0.15)
-                        if st.button(f"➕ 添加 {name}"):
+                        col1, col2 = st.columns([2, 1])
+                        col1.write(f"{name} - {weight}g")
+                        col2.write(f"{cal:.0f} kcal")
+                        if col2.button(f"➕", key=f"vision_{name}"):
                             st.session_state.food_records.append({
-                                '时间': get_current_time(), '餐次': meal, '名称': name,
-                                '数量': weight, '单位': 'g', '热量': cal, '蛋白质': pro
+                                '时间': get_current_time(),
+                                '餐次': meal,
+                                '名称': name,
+                                '数量': weight,
+                                '单位': 'g',
+                                '热量': cal,
+                                '蛋白质': pro
                             })
                             st.session_state.total_calories += cal
                             st.session_state.total_protein += pro
                             st.success(f"✅ 已添加 {name}")
                             st.rerun()
     
-    # 显示记录
+    # 显示今日饮食记录
     st.markdown("---")
     st.markdown("### 📋 今日饮食")
+    
     if len(st.session_state.food_records) > 0:
         for m in ["早餐", "午餐", "晚餐", "加餐"]:
             items = [r for r in st.session_state.food_records if r.get('餐次') == m]
@@ -222,16 +234,16 @@ with col_mid:
                 st.markdown(f"**{m}**")
                 for r in items:
                     unit = r.get('单位', 'g')
-                    label = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])['label']
-                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['数量']}{label} | {r['热量']:.0f}kcal")
+                    unit_label = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])['label']
+                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['数量']}{unit_label} | {r['热量']:.0f}kcal")
     else:
-        st.info("暂无")
+        st.info("暂无饮食记录，请搜索添加")
 
 # ==================== 右侧：运动消耗 ====================
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 搜索", "✏️ 自定义", "📸 拍照"], horizontal=True)
-    st.caption(f"🕐 {get_current_time()}")
+    st.caption(f"🕐 当前时间: {get_current_time()}")
     
     if mode_ex == "🔍 搜索":
         search = st.text_input("🔍 搜索运动", placeholder="深蹲、硬拉...")
@@ -239,54 +251,67 @@ with col_right:
         if len(filtered) == 0:
             st.warning("未找到")
             filtered = df_exercise
-        ex_name = st.selectbox("运动", filtered['器材'].tolist())
+        ex_name = st.selectbox("选择运动", filtered['器材'].tolist())
         ex = df_exercise[df_exercise['器材'] == ex_name].iloc[0]
         st.caption(f"{ex['说明']} | {ex['消耗系数']} kcal/kg/分钟")
-        dur = st.number_input("分钟", 1, 180, 30, 5)
-        extra = st.number_input("负重(kg)", 0, 100, 0, 5)
+        dur = st.number_input("分钟", 1, 180, 30, 5, key="dur")
+        extra = st.number_input("负重(kg)", 0, 100, 0, 5, key="extra")
         cal = ex['消耗系数'] * (st.session_state.user_profile['weight'] + extra) * dur
-        st.info(f"🔥 {cal:.0f} kcal")
-        if st.button("✅ 记录"):
+        st.info(f"🔥 预计消耗: **{cal:.0f} kcal**")
+        
+        if st.button("✅ 记录运动"):
             st.session_state.exercise_records.append({
-                '时间': get_current_time(), '器材': ex_name, '时长': dur, '负重': extra, '消耗': cal
+                '时间': get_current_time(),
+                '器材': ex_name,
+                '时长': dur,
+                '负重': extra,
+                '消耗': cal
             })
             st.session_state.total_burned += cal
-            st.success(f"✅ 已记录")
+            st.success(f"✅ 已记录 {ex_name} {dur}分钟")
             st.rerun()
     
     elif mode_ex == "✏️ 自定义":
-        name = st.text_input("运动名称")
-        coeff = st.number_input("系数", 0.01, 0.50, 0.08, 0.01)
+        name = st.text_input("运动名称", placeholder="保加利亚深蹲...")
+        coeff = st.number_input("消耗系数", 0.01, 0.50, 0.08, 0.01, key="coeff")
         dur = st.number_input("分钟", 1, 180, 30, 5, key="c_dur")
-        extra = st.number_input("负重", 0, 100, 0, 5, key="c_extra")
+        extra = st.number_input("负重(kg)", 0, 100, 0, 5, key="c_extra")
         if name:
             cal = coeff * (st.session_state.user_profile['weight'] + extra) * dur
-            st.info(f"🔥 {cal:.0f} kcal")
-            if st.button("✅ 记录"):
+            st.info(f"🔥 预计消耗: **{cal:.0f} kcal**")
+            if st.button("✅ 记录运动"):
                 st.session_state.exercise_records.append({
-                    '时间': get_current_time(), '器材': name, '时长': dur, '负重': extra, '消耗': cal
+                    '时间': get_current_time(),
+                    '器材': name,
+                    '时长': dur,
+                    '负重': extra,
+                    '消耗': cal
                 })
                 st.session_state.total_burned += cal
-                st.success(f"✅ 已记录")
+                st.success(f"✅ 已记录 {name}")
                 st.rerun()
     
     else:
         recognizer = get_recognizer()
         if recognizer:
             img = st.camera_input("拍照", key="ex_cam") or st.file_uploader("图片", type=['jpg', 'png'], key="ex_up")
-            if img and st.button("识别"):
+            if img and st.button("识别器材"):
                 img = Image.open(img)
                 img.save("/tmp/ex.jpg")
                 res = recognizer.recognize_food("/tmp/ex.jpg")
                 if not res.get("error"):
                     name = res.get("foods", [{}])[0].get('name', '未知')
-                    st.write(f"识别: {name}")
+                    st.write(f"识别到: {name}")
                     dur = st.number_input("分钟", 1, 180, 30, 5, key="r_dur")
-                    extra = st.number_input("负重", 0, 100, 0, 5, key="r_extra")
-                    if st.button("记录"):
+                    extra = st.number_input("负重(kg)", 0, 100, 0, 5, key="r_extra")
+                    if st.button("记录运动"):
                         cal = 0.08 * (st.session_state.user_profile['weight'] + extra) * dur
                         st.session_state.exercise_records.append({
-                            '时间': get_current_time(), '器材': name, '时长': dur, '负重': extra, '消耗': cal
+                            '时间': get_current_time(),
+                            '器材': name,
+                            '时长': dur,
+                            '负重': extra,
+                            '消耗': cal
                         })
                         st.session_state.total_burned += cal
                         st.success("✅ 已记录")
@@ -300,7 +325,7 @@ with col_right:
         for r in st.session_state.exercise_records[-15:]:
             st.write(f"  🕐 {r['时间']} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
     else:
-        st.info("暂无")
+        st.info("暂无运动记录")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 🕐 自动时间</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索食物/运动 | ✏️ 自定义 | 📸 拍照识别</p>", unsafe_allow_html=True)
