@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import json
 from datetime import datetime
 from PIL import Image
 import uuid
@@ -44,29 +45,46 @@ def get_recognizer():
         return FoodImageRecognizer(api_type="qwen", api_key=api_key)
     return None
 
-# 初始化 Session State
-if 'food_records' not in st.session_state:
-    st.session_state.food_records = []
-if 'exercise_records' not in st.session_state:
-    st.session_state.exercise_records = []
-if 'total_calories' not in st.session_state:
-    st.session_state.total_calories = 0
-if 'total_protein' not in st.session_state:
-    st.session_state.total_protein = 0
-if 'total_burned' not in st.session_state:
-    st.session_state.total_burned = 0
-if 'user_profile' not in st.session_state:
-    st.session_state.user_profile = {'gender': '男', 'weight': 70, 'height': 170, 'age': 25, 'activity_level': '中等', 'goal': '减脂'}
-if 'bmr' not in st.session_state:
-    st.session_state.bmr = 1600
-if 'daily_target' not in st.session_state:
-    st.session_state.daily_target = 2000
-if 'search_results' not in st.session_state:
-    st.session_state.search_results = None
-if 'search_weight' not in st.session_state:
-    st.session_state.search_weight = 100
-if 'search_term' not in st.session_state:
-    st.session_state.search_term = ""
+# ==================== 持久化存储功能 ====================
+# 使用 session_state 存储所有数据，页面刷新时自动保留
+
+def load_saved_data():
+    """从本地存储加载保存的数据"""
+    # 默认值
+    default_profile = {'gender': '男', 'weight': 70, 'height': 170, 'age': 25, 
+                      'activity_level': '中等', 'goal': '减脂'}
+    
+    # 如果已有数据，直接返回
+    if 'user_profile' in st.session_state and st.session_state.user_profile:
+        return
+    
+    # 尝试从 session 中恢复（Streamlit Cloud 会保留）
+    if 'saved_profile' in st.session_state:
+        st.session_state.user_profile = st.session_state.saved_profile
+    else:
+        st.session_state.user_profile = default_profile.copy()
+    
+    # 初始化其他状态
+    if 'food_records' not in st.session_state:
+        st.session_state.food_records = []
+    if 'exercise_records' not in st.session_state:
+        st.session_state.exercise_records = []
+    if 'total_calories' not in st.session_state:
+        st.session_state.total_calories = 0
+    if 'total_protein' not in st.session_state:
+        st.session_state.total_protein = 0
+    if 'total_burned' not in st.session_state:
+        st.session_state.total_burned = 0
+    if 'search_results' not in st.session_state:
+        st.session_state.search_results = None
+    if 'search_weight' not in st.session_state:
+        st.session_state.search_weight = 100
+    if 'search_term' not in st.session_state:
+        st.session_state.search_term = ""
+
+def save_profile_to_session():
+    """保存个人信息到 session"""
+    st.session_state.saved_profile = st.session_state.user_profile.copy()
 
 # 计算 BMR
 def calculate_bmr():
@@ -85,6 +103,15 @@ def calculate_bmr():
         target = tdee
     st.session_state.bmr = int(bmr)
     st.session_state.daily_target = int(target)
+
+# 加载保存的数据
+load_saved_data()
+
+# 确保 BMR 和每日目标已计算
+if 'bmr' not in st.session_state:
+    calculate_bmr()
+if 'daily_target' not in st.session_state:
+    calculate_bmr()
 
 # CSS
 st.markdown("""
@@ -112,8 +139,12 @@ col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 with col_left:
     st.markdown("### 👤 个人信息")
     
-    with st.expander("编辑信息", expanded=False):
-        gender = st.selectbox("性别", ["男", "女"], index=0 if st.session_state.user_profile['gender']=='男' else 1)
+    # 显示当前保存的信息
+    st.info(f"👋 欢迎回来！\n\n身高: {st.session_state.user_profile['height']}cm | 体重: {st.session_state.user_profile['weight']}kg | 目标: {st.session_state.user_profile['goal']}")
+    
+    with st.expander("✏️ 编辑个人信息", expanded=False):
+        gender = st.selectbox("性别", ["男", "女"], 
+                              index=0 if st.session_state.user_profile['gender']=='男' else 1)
         age = st.number_input("年龄", 15, 100, st.session_state.user_profile['age'])
         height = st.number_input("身高(cm)", 100, 250, st.session_state.user_profile['height'])
         weight = st.number_input("体重(kg)", 30, 200, st.session_state.user_profile['weight'])
@@ -122,10 +153,14 @@ with col_left:
         goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
                            index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
         
-        if st.button("更新信息", use_container_width=True):
-            st.session_state.user_profile = {'gender': gender, 'age': age, 'height': height, 'weight': weight,
-                                            'activity_level': activity, 'goal': goal}
+        if st.button("💾 保存个人信息", use_container_width=True):
+            st.session_state.user_profile = {
+                'gender': gender, 'age': age, 'height': height, 'weight': weight,
+                'activity_level': activity, 'goal': goal
+            }
             calculate_bmr()
+            save_profile_to_session()
+            st.success("✅ 个人信息已保存！下次访问自动加载")
             st.rerun()
     
     st.markdown("---")
@@ -155,6 +190,7 @@ with col_left:
         st.session_state.total_calories = 0
         st.session_state.total_protein = 0
         st.session_state.total_burned = 0
+        st.success("✅ 记录已清空")
         st.rerun()
 
 # ==================== 中间：食物摄入 ====================
@@ -386,10 +422,9 @@ with col_right:
         total_min = sum(r['时长'] for r in st.session_state.exercise_records)
         st.metric("总时长", f"{total_min} 分钟")
         for r in st.session_state.exercise_records[-15:]:
-            source = r.get('来源', '')
             st.write(f"  🕐 {r['时间']} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
     else:
         st.info("暂无记录")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入vs消耗</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入vs消耗 | 💾 自动保存个人信息</p>", unsafe_allow_html=True)
