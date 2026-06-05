@@ -11,7 +11,7 @@ import uuid
 from image_recognition import FoodImageRecognizer
 
 st.set_page_config(
-    page_title="健身营养助手 - 完整版",
+    page_title="健身营养助手",
     page_icon="💪",
     layout="wide"
 )
@@ -30,21 +30,14 @@ def load_exercise_data():
         {"器材": "动感单车", "类型": "有氧", "消耗系数": 0.11, "说明": "中等强度"},
         {"器材": "划船机", "类型": "有氧", "消耗系数": 0.13, "说明": "全身运动"},
         {"器材": "登山机", "类型": "有氧", "消耗系数": 0.14, "说明": "高强度"},
-        {"器材": "踏步机", "类型": "有氧", "消耗系数": 0.09, "说明": "低强度"},
         {"器材": "跳绳", "类型": "有氧", "消耗系数": 0.15, "说明": "高强度"},
-        {"器材": "战绳", "类型": "高强度", "消耗系数": 0.16, "说明": "爆发力"},
-        {"器材": "波比跳", "类型": "高强度", "消耗系数": 0.18, "说明": "全身"},
         {"器材": "卧推架", "类型": "力量", "消耗系数": 0.07, "说明": "胸部训练"},
         {"器材": "深蹲架", "类型": "力量", "消耗系数": 0.09, "说明": "腿部训练"},
-        {"器材": "硬拉架", "类型": "力量", "消耗系数": 0.08, "说明": "全身训练"},
         {"器材": "引体向上架", "类型": "力量", "消耗系数": 0.07, "说明": "背部训练"},
-        {"器材": "龙门架", "类型": "力量", "消耗系数": 0.06, "说明": "多功能"},
         {"器材": "哑铃", "类型": "自由重量", "消耗系数": 0.06, "说明": "通用"},
         {"器材": "杠铃", "类型": "自由重量", "消耗系数": 0.07, "说明": "通用"},
         {"器材": "壶铃", "类型": "自由重量", "消耗系数": 0.10, "说明": "爆发力"},
         {"器材": "瑜伽", "类型": "柔韧", "消耗系数": 0.05, "说明": "放松"},
-        {"器材": "健腹轮", "类型": "核心", "消耗系数": 0.08, "说明": "腹部"},
-        {"器材": "弹力带", "类型": "力量", "消耗系数": 0.05, "说明": "拉伸"},
     ])
     return exercises
 
@@ -124,8 +117,6 @@ st.markdown("""
     }
     @media (max-width: 768px) {
         .stButton button { width: 100%; }
-        .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-        .stTabs [data-baseweb="tab"] { font-size: 12px; padding: 4px 8px; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -197,9 +188,10 @@ with col1:
     with col_b:
         st.metric("🏋️ 消耗", f"{st.session_state.total_burned:.0f} kcal")
     
-    # 修复 progress bar - 确保值在 [0,1] 范围内
+    # 修复 progress bar
     if st.session_state.daily_target > 0:
-        progress_value = min(max((st.session_state.daily_target - remaining) / st.session_state.daily_target, 0.0), 1.0)
+        consumed = st.session_state.total_calories - st.session_state.total_burned
+        progress_value = min(max(consumed / st.session_state.daily_target, 0.0), 1.0)
     else:
         progress_value = 0.0
     
@@ -225,101 +217,107 @@ with col2:
     
     # 餐次选择
     meal_options = ["早餐", "午餐", "晚餐", "加餐"]
-    current_meal_index = meal_options.index(st.session_state.current_meal) if st.session_state.current_meal in meal_options else 0
-    
-    selected_meal = st.selectbox(
-        "餐次", 
-        meal_options,
-        index=current_meal_index,
-        key="meal_select"
-    )
-    st.session_state.current_meal = selected_meal
+    selected_meal = st.selectbox("餐次", meal_options, key="meal_select")
     
     # 输入方式
-    food_mode = st.radio("输入方式", ["🔍 手动搜索", "📸 拍照识别"], horizontal=True, key="food_mode")
+    food_mode = st.radio("输入方式", ["手动搜索", "拍照识别"], horizontal=True, key="food_mode")
     
     # ===== 手动搜索 =====
-    if food_mode == "🔍 手动搜索":
-        col_a, col_b = st.columns([3, 1])
-        with col_a:
-            search = st.text_input("搜索食物", placeholder="鸡胸肉、米饭、西兰花...", key="food_search_input")
-        with col_b:
-            food_weight = st.number_input("重量(g)", 10, 1000, 100, 50, key="food_weight_input")
+    if food_mode == "手动搜索":
+        # 搜索框和重量在一行
+        col_search, col_weight = st.columns([3, 1])
+        with col_search:
+            search = st.text_input("食物名称", placeholder="鸡胸肉、米饭、西兰花...", key="food_search")
+        with col_weight:
+            food_weight = st.number_input("重量(g)", 10, 1000, 100, 50, key="food_w")
         
         if search:
+            # 搜索匹配
             results = df_food[df_food['名称'].str.contains(search, na=False)]
-            for idx, row in results.head(8).iterrows():
-                cal = row['热量'] * food_weight / 100
-                pro = row['蛋白质'] * food_weight / 100
-                
-                c1, c2, c3, c4 = st.columns([2, 1.2, 1.2, 1])
-                with c1:
-                    st.markdown(f"**{row['名称']}**")
-                    st.caption(row['类别'])
-                with c2:
-                    st.write(f"{cal:.0f} kcal")
-                with c3:
-                    st.write(f"蛋白质 {pro:.0f}g")  # 改为文字
-                with c4:
-                    button_key = f"food_{selected_meal}_{row['名称']}_{idx}_{uuid.uuid4().hex[:4]}"
-                    if st.button(f"➕ 添加", key=button_key):
-                        st.session_state.total_calories += cal
-                        st.session_state.total_protein += pro
-                        st.session_state.food_records.append({
-                            '时间': datetime.now().strftime("%H:%M"),
-                            '餐次': selected_meal,
-                            '名称': row['名称'],
-                            '重量': food_weight,
-                            '热量': cal,
-                            '蛋白质': pro,
-                            '来源': '手动'
-                        })
-                        st.success(f"✅ 已添加 {row['名称']} 到{selected_meal}")
-                        st.rerun()
-                st.divider()
+            
+            if len(results) == 0:
+                st.warning("未找到该食物，尝试其他关键词")
+            else:
+                # 显示结果列表
+                for idx, row in results.head(10).iterrows():
+                    cal_per_100g = row['热量']
+                    pro_per_100g = row['蛋白质']
+                    cal = cal_per_100g * food_weight / 100
+                    pro = pro_per_100g * food_weight / 100
+                    
+                    # 使用容器显示每个食物
+                    with st.container():
+                        col_name, col_cal, col_pro, col_btn = st.columns([2.5, 1, 1.2, 1])
+                        col_name.write(f"**{row['名称']}**")
+                        col_name.caption(row['类别'])
+                        col_cal.write(f"{cal:.0f} kcal")
+                        col_pro.write(f"蛋白质 {pro:.0f}g")
+                        
+                        # 添加按钮 - 使用唯一的key
+                        btn_key = f"add_food_{selected_meal}_{row['名称']}_{idx}_{uuid.uuid4().hex[:6]}"
+                        if col_btn.button("➕", key=btn_key, use_container_width=True):
+                            # 更新总量
+                            st.session_state.total_calories += cal
+                            st.session_state.total_protein += pro
+                            # 添加记录
+                            st.session_state.food_records.append({
+                                '时间': datetime.now().strftime("%H:%M"),
+                                '餐次': selected_meal,
+                                '名称': row['名称'],
+                                '重量': food_weight,
+                                '热量': cal,
+                                '蛋白质': pro,
+                                '来源': '手动'
+                            })
+                            st.success(f"✅ 已添加 {row['名称']} ({food_weight}g) 到{selected_meal}")
+                            st.rerun()
+                    st.divider()
     
     # ===== 拍照识别 =====
     else:
         recognizer = get_recognizer()
-        
         if recognizer is None:
-            st.warning("⚠️ 未配置 API Key")
+            st.warning("⚠️ 未配置 API Key，拍照识别功能不可用")
         else:
-            input_method = st.radio("图片来源", ["📱 手机拍照", "📁 相册上传"], horizontal=True, key="food_input_method")
+            input_method = st.radio("图片来源", ["手机拍照", "相册上传"], horizontal=True, key="food_input_method")
             
             uploaded_file = None
-            if input_method == "📱 手机拍照":
-                camera_img = st.camera_input("点击拍照", key="food_camera")
-                if camera_img:
-                    uploaded_file = camera_img
+            if input_method == "手机拍照":
+                uploaded_file = st.camera_input("拍照", key="food_camera")
             else:
                 uploaded_file = st.file_uploader("选择图片", type=['jpg', 'jpeg', 'png'], key="food_upload")
             
             if uploaded_file:
                 image = Image.open(uploaded_file)
-                st.image(image, caption="食物图片", use_container_width=True)
+                st.image(image, caption="图片", use_container_width=True)
                 
-                if st.button("🔍 识别食物", type="primary", use_container_width=True, key="food_recognize_btn"):
+                if st.button("识别食物", type="primary", key="food_recognize"):
                     with st.spinner("AI识别中..."):
                         temp_path = f"/tmp/food_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                         image.save(temp_path)
                         result = recognizer.recognize_food(temp_path)
+                        os.remove(temp_path)
                         
                         if "error" in result:
                             st.error(f"识别失败: {result['error']}")
                         else:
-                            for food in result.get("foods", []):
-                                name = food.get('name', '未知')
-                                fw = food.get('weight', 150)
-                                cal = food.get('calories', fw * 1.5)
-                                pro = food.get('protein', fw * 0.15)
-                                
-                                c1, c2 = st.columns([3, 1])
-                                with c1:
-                                    st.markdown(f"**{name}** - {fw}g, {cal:.0f}kcal, 蛋白质{pro:.0f}g")
-                                with c2:
-                                    vision_key = f"vision_{selected_meal}_{name}_{uuid.uuid4().hex[:4]}"
-                                    if st.button(f"✅ 添加", key=vision_key):
+                            foods = result.get("foods", [])
+                            if not foods:
+                                st.info("未识别到食物")
+                            else:
+                                for food in foods:
+                                    name = food.get('name', '未知')
+                                    fw = food.get('weight', 150)
+                                    cal = food.get('calories', fw * 1.5)
+                                    pro = food.get('protein', fw * 0.15)
+                                    
+                                    col_a, col_b, col_c = st.columns([2, 1, 1])
+                                    col_a.write(f"**{name}**")
+                                    col_b.write(f"{cal:.0f} kcal")
+                                    col_c.write(f"蛋白质 {pro:.0f}g")
+                                    
+                                    btn_key = f"add_vision_{selected_meal}_{name}_{uuid.uuid4().hex[:6]}"
+                                    if st.button("➕ 添加", key=btn_key):
                                         st.session_state.total_calories += cal
                                         st.session_state.total_protein += pro
                                         st.session_state.food_records.append({
@@ -331,44 +329,41 @@ with col2:
                                             '蛋白质': pro,
                                             '来源': '拍照'
                                         })
-                                        st.success(f"✅ 已添加 {name} 到{selected_meal}")
+                                        st.success(f"✅ 已添加 {name}")
                                         st.rerun()
-                        os.remove(temp_path)
     
-    # 显示今日食物记录
+    # 显示今日饮食记录
     st.markdown("---")
     st.markdown("### 📋 今日饮食")
     
-    if st.session_state.food_records:
-        for m in ["早餐", "午餐", "晚餐", "加餐"]:
-            meals = [r for r in st.session_state.food_records if r.get('餐次') == m]
-            if meals:
-                st.markdown(f"**{m}**")
-                for r in meals[-10:]:
-                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['重量']}g | {r['热量']:.0f}kcal | 蛋白质 {r['蛋白质']:.0f}g")
+    if len(st.session_state.food_records) > 0:
+        # 按餐次分组显示
+        for meal in ["早餐", "午餐", "晚餐", "加餐"]:
+            meal_records = [r for r in st.session_state.food_records if r.get('餐次') == meal]
+            if meal_records:
+                st.markdown(f"**{meal}**")
+                for r in meal_records:
+                    st.write(f"  {r['时间']} | {r['名称']} | {r['重量']}g | {r['热量']:.0f}kcal | 蛋白质 {r['蛋白质']:.0f}g")
     else:
-        st.info("暂无记录")
+        st.info("暂无饮食记录")
 
 # ==================== 右侧：运动消耗模块 ====================
 with col3:
     st.markdown("## 🏋️ 运动消耗")
     
-    # 输入方式
-    exercise_mode = st.radio("输入方式", ["🔍 手动选择", "📸 拍照识别"], horizontal=True, key="exercise_mode")
+    exercise_mode = st.radio("输入方式", ["手动选择", "拍照识别"], horizontal=True, key="exercise_mode")
     
     # ===== 手动选择 =====
-    if exercise_mode == "🔍 手动选择":
+    if exercise_mode == "手动选择":
         exercise_name = st.selectbox("选择器材", df_exercise['器材'].tolist(), key="manual_exercise")
         selected = df_exercise[df_exercise['器材'] == exercise_name].iloc[0]
-        st.caption(f"💡 {selected['说明']} | 消耗系数: {selected['消耗系数']} kcal/kg/min")
+        st.caption(f"💡 {selected['说明']} | {selected['消耗系数']} kcal/kg/分钟")
         
-        col_a, col_b, col_c = st.columns(3)
+        col_a, col_b = st.columns(2)
         with col_a:
             duration = st.number_input("时长(分钟)", 1, 180, 30, 5, key="manual_duration")
         with col_b:
             extra_weight = st.number_input("负重(kg)", 0, 100, 0, 5, key="manual_weight")
-        with col_c:
-            st.metric("体重", f"{weight} kg")
         
         calories = calculate_exercise_calories(selected, duration, weight, extra_weight)
         st.info(f"🔥 预计消耗: **{calories:.0f} kcal**")
@@ -389,35 +384,33 @@ with col3:
     # ===== 拍照识别器材 =====
     else:
         recognizer = get_recognizer()
-        
         if recognizer is None:
             st.warning("⚠️ 未配置 API Key")
         else:
-            input_method = st.radio("图片来源", ["📱 手机拍照", "📁 相册上传"], horizontal=True, key="exercise_input_method")
+            input_method = st.radio("图片来源", ["手机拍照", "相册上传"], horizontal=True, key="exercise_input_method")
             
             uploaded_file = None
-            if input_method == "📱 手机拍照":
-                camera_img = st.camera_input("点击拍照", key="exercise_camera")
-                if camera_img:
-                    uploaded_file = camera_img
+            if input_method == "手机拍照":
+                uploaded_file = st.camera_input("拍照", key="exercise_camera")
             else:
                 uploaded_file = st.file_uploader("选择图片", type=['jpg', 'jpeg', 'png'], key="exercise_upload")
             
             if uploaded_file:
                 image = Image.open(uploaded_file)
-                st.image(image, caption="器材图片", use_container_width=True)
+                st.image(image, caption="图片", use_container_width=True)
                 
-                if st.button("🔍 识别器材", type="primary", use_container_width=True, key="exercise_recognize_btn"):
+                if st.button("识别器材", key="exercise_recognize"):
                     with st.spinner("AI识别中..."):
                         temp_path = f"/tmp/exercise_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                         image.save(temp_path)
                         result = recognizer.recognize_food(temp_path)
+                        os.remove(temp_path)
                         
                         if "error" in result:
                             st.error(f"识别失败: {result['error']}")
                         else:
-                            detected_name = result.get("foods", [{}])[0].get('name', '未知器材')
-                            exercise_name = st.text_input("器材名称", value=detected_name, key="detected_exercise")
+                            detected = result.get("foods", [{}])[0].get('name', '未知')
+                            ex_name = st.text_input("器材名称", value=detected, key="detected_name")
                             
                             col_a, col_b = st.columns(2)
                             with col_a:
@@ -425,40 +418,36 @@ with col3:
                             with col_b:
                                 extra_weight = st.number_input("负重(kg)", 0, 100, 0, 5, key="reco_weight")
                             
-                            matched = df_exercise[df_exercise['器材'].str.contains(exercise_name[:4], na=False)]
+                            # 查找匹配的器材
+                            matched = df_exercise[df_exercise['器材'].str.contains(ex_name[:4], na=False)]
                             if len(matched) > 0:
-                                coeff = float(matched.iloc[0]['消耗系数'])
-                                calories = coeff * (weight + extra_weight) * duration
+                                calories = matched.iloc[0]['消耗系数'] * (weight + extra_weight) * duration
                                 st.info(f"🔥 预计消耗: **{calories:.0f} kcal**")
                                 
-                                if st.button("✅ 记录运动", key="reco_add"):
+                                if st.button("✅ 记录", key="reco_add"):
                                     st.session_state.total_burned += calories
                                     st.session_state.exercise_records.append({
                                         '时间': datetime.now().strftime("%H:%M"),
-                                        '器材': exercise_name,
+                                        '器材': ex_name,
                                         '时长': duration,
                                         '负重': extra_weight,
                                         '消耗': calories,
                                         '来源': '拍照'
                                     })
-                                    st.success(f"✅ 已记录 {exercise_name} {duration}分钟")
+                                    st.success(f"✅ 已记录")
                                     st.rerun()
-                            else:
-                                st.warning("未找到匹配器材，请手动选择")
-                        os.remove(temp_path)
     
     # 显示今日运动记录
     st.markdown("---")
     st.markdown("### 📋 今日运动")
     
-    if st.session_state.exercise_records:
+    if len(st.session_state.exercise_records) > 0:
         total_minutes = sum(r.get('时长', 0) for r in st.session_state.exercise_records)
         st.metric("🏋️ 总时长", f"{total_minutes} 分钟")
         for r in st.session_state.exercise_records[-15:]:
-            st.write(f"  🕐 {r['时间']} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
+            st.write(f"  {r['时间']} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
     else:
-        st.info("暂无记录")
+        st.info("暂无运动记录")
 
-# ==================== 底部 ====================
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>📸 拍照识别食物/器材 | 🏋️ 累计运动消耗 | 📊 摄入vs消耗净差</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>📸 拍照识别 | 🏋️ 运动消耗 | 📊 摄入vs消耗</p>", unsafe_allow_html=True)
