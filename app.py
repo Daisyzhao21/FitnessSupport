@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import uuid
 
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
@@ -44,6 +43,12 @@ if 'bmr' not in st.session_state:
     st.session_state.bmr = 1600
 if 'daily_target' not in st.session_state:
     st.session_state.daily_target = 2000
+if 'search_results' not in st.session_state:
+    st.session_state.search_results = None
+if 'search_weight' not in st.session_state:
+    st.session_state.search_weight = 100
+if 'search_term' not in st.session_state:
+    st.session_state.search_term = ""
 
 # 计算 BMR
 def calculate_bmr():
@@ -62,30 +67,6 @@ def calculate_bmr():
         target = tdee
     st.session_state.bmr = int(bmr)
     st.session_state.daily_target = int(target)
-
-# 添加食物的函数
-def add_food(meal, name, weight, cal, pro):
-    st.session_state.food_records.append({
-        '时间': datetime.now().strftime("%H:%M"),
-        '餐次': meal,
-        '名称': name,
-        '重量': weight,
-        '热量': cal,
-        '蛋白质': pro
-    })
-    st.session_state.total_calories += cal
-    st.session_state.total_protein += pro
-
-# 添加运动的函数
-def add_exercise(name, duration, extra_weight, calories):
-    st.session_state.exercise_records.append({
-        '时间': datetime.now().strftime("%H:%M"),
-        '器材': name,
-        '时长': duration,
-        '负重': extra_weight,
-        '消耗': calories
-    })
-    st.session_state.total_burned += calories
 
 # CSS
 st.markdown("""
@@ -161,33 +142,54 @@ with col_mid:
     
     meal = st.selectbox("餐次", ["早餐", "午餐", "晚餐", "加餐"], key="meal_selector")
     
-    # 使用表单来避免 rerun 问题
-    with st.form(key="food_form", clear_on_submit=True):
-        search = st.text_input("搜索食物", placeholder="鸡胸肉、米饭、西兰花...")
-        food_weight = st.number_input("重量(克)", 10, 1000, 100, step=50)
-        submitted = st.form_submit_button("🔍 搜索", use_container_width=True)
+    # 搜索区域
+    col_s1, col_s2 = st.columns([3, 1])
+    with col_s1:
+        search_term = st.text_input("搜索食物", placeholder="鸡胸肉、米饭、西兰花...", key="search_input", value=st.session_state.search_term)
+    with col_s2:
+        search_weight = st.number_input("重量(g)", 10, 1000, st.session_state.search_weight, step=50, key="search_weight_input")
     
-    if submitted and search:
-        results = df_food[df_food['名称'].str.contains(search, na=False)]
-        if len(results) == 0:
-            st.warning("未找到该食物")
+    # 保存搜索状态
+    if search_term != st.session_state.search_term or search_weight != st.session_state.search_weight:
+        st.session_state.search_term = search_term
+        st.session_state.search_weight = search_weight
+        if search_term:
+            results = df_food[df_food['名称'].str.contains(search_term, na=False)]
+            st.session_state.search_results = results.head(8) if len(results) > 0 else None
         else:
-            for _, row in results.head(8).iterrows():
-                cal = row['热量'] * food_weight / 100
-                pro = row['蛋白质'] * food_weight / 100
-                
-                c1, c2, c3, c4 = st.columns([2, 1.2, 1.2, 1])
-                c1.markdown(f"**{row['名称']}**")
-                c1.caption(row['类别'])
-                c2.write(f"{cal:.0f} kcal")
-                c3.write(f"蛋白质 {pro:.0f}g")
-                
-                # 每个食物独立的添加按钮
-                btn_key = f"add_{meal}_{row['名称']}_{row['热量']}"
-                if c4.button("➕ 添加", key=btn_key):
-                    add_food(meal, row['名称'], food_weight, cal, pro)
-                    st.success(f"✅ 已添加 {row['名称']} ({food_weight}g)")
-                    st.rerun()
+            st.session_state.search_results = None
+    
+    # 显示搜索结果
+    if st.session_state.search_results is not None and len(st.session_state.search_results) > 0:
+        for idx, row in st.session_state.search_results.iterrows():
+            cal = row['热量'] * st.session_state.search_weight / 100
+            pro = row['蛋白质'] * st.session_state.search_weight / 100
+            
+            c1, c2, c3, c4 = st.columns([2, 1.2, 1.2, 1])
+            c1.markdown(f"**{row['名称']}**")
+            c1.caption(row['类别'])
+            c2.write(f"{cal:.0f} kcal")
+            c3.write(f"蛋白质 {pro:.0f}g")
+            
+            # 使用 query_params 来触发添加，避免 rerun 问题
+            button_key = f"add_{meal}_{row['名称']}_{idx}"
+            if c4.button("➕ 添加", key=button_key):
+                # 直接修改 session state
+                st.session_state.food_records.append({
+                    '时间': datetime.now().strftime("%H:%M"),
+                    '餐次': meal,
+                    '名称': row['名称'],
+                    '重量': st.session_state.search_weight,
+                    '热量': cal,
+                    '蛋白质': pro
+                })
+                st.session_state.total_calories += cal
+                st.session_state.total_protein += pro
+                st.success(f"✅ 已添加 {row['名称']} ({st.session_state.search_weight}g) 到{meal}")
+                # 强制刷新页面
+                st.rerun()
+    elif search_term:
+        st.warning("未找到该食物，请尝试其他关键词")
     
     st.markdown("---")
     st.markdown("### 📋 今日饮食")
@@ -206,21 +208,25 @@ with col_mid:
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     
-    with st.form(key="exercise_form", clear_on_submit=True):
-        exercise_name = st.selectbox("选择器材", df_exercise['器材'].tolist())
-        duration = st.number_input("时长(分钟)", 1, 180, 30, step=5)
-        extra_weight = st.number_input("负重(kg)", 0, 100, 0, step=5)
-        submitted_ex = st.form_submit_button("计算并记录", use_container_width=True)
+    exercise_name = st.selectbox("选择器材", df_exercise['器材'].tolist(), key="exercise_select")
+    duration = st.number_input("时长(分钟)", 1, 180, 30, step=5, key="duration_input")
+    extra_weight = st.number_input("负重(kg)", 0, 100, 0, step=5, key="extra_weight_input")
     
-    if submitted_ex:
-        selected = df_exercise[df_exercise['器材'] == exercise_name].iloc[0]
-        calories = selected['消耗系数'] * (st.session_state.user_profile['weight'] + extra_weight) * duration
-        st.info(f"🔥 预计消耗: {calories:.0f} kcal")
-        
-        if st.button("✅ 确认记录", key="confirm_exercise"):
-            add_exercise(exercise_name, duration, extra_weight, calories)
-            st.success(f"✅ 已记录 {exercise_name} {duration}分钟")
-            st.rerun()
+    selected = df_exercise[df_exercise['器材'] == exercise_name].iloc[0]
+    calories = selected['消耗系数'] * (st.session_state.user_profile['weight'] + extra_weight) * duration
+    st.info(f"🔥 预计消耗: **{calories:.0f} kcal**")
+    
+    if st.button("✅ 记录运动", type="primary", use_container_width=True, key="add_exercise"):
+        st.session_state.exercise_records.append({
+            '时间': datetime.now().strftime("%H:%M"),
+            '器材': exercise_name,
+            '时长': duration,
+            '负重': extra_weight,
+            '消耗': calories
+        })
+        st.session_state.total_burned += calories
+        st.success(f"✅ 已记录 {exercise_name} {duration}分钟")
+        st.rerun()
     
     st.markdown("---")
     st.markdown("### 📋 今日运动")
