@@ -7,13 +7,7 @@ import uuid
 
 from image_recognition import FoodImageRecognizer
 
-# 必须在最前面设置页面配置
-st.set_page_config(
-    page_title="健身营养助手",
-    page_icon="💪",
-    layout="wide",
-    initial_sidebar_state="auto"
-)
+st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
 # 加载数据
 @st.cache_data
@@ -33,13 +27,8 @@ UNIT_CONFIG = {
     'g': {'label': '克', 'default': 100, 'step': 50, 'min': 10, 'max': 1000},
     'ml': {'label': '毫升', 'default': 250, 'step': 50, 'min': 50, 'max': 1000},
     '个': {'label': '个', 'default': 1, 'step': 1, 'min': 1, 'max': 10},
-    '片': {'label': '片', 'default': 1, 'step': 1, 'min': 1, 'max': 8},
-    '块': {'label': '块', 'default': 1, 'step': 1, 'min': 1, 'max': 10},
-    '球': {'label': '球', 'default': 1, 'step': 1, 'min': 1, 'max': 5},
     '碗': {'label': '碗', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
     '杯': {'label': '杯', 'default': 1, 'step': 1, 'min': 1, 'max': 5},
-    '瓶': {'label': '瓶', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
-    '罐': {'label': '罐', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
 }
 
 def get_recognizer():
@@ -51,24 +40,23 @@ def get_recognizer():
 def get_current_time():
     return datetime.now().strftime("%H:%M")
 
-# 强制初始化 Session State（使用 get 方法避免覆盖）
-def init_session():
-    defaults = {
-        'user_profile': {'gender': '男', 'weight': 70, 'height': 170, 'age': 25, 'activity_level': '中等', 'goal': '减脂'},
-        'food_records': [],
-        'exercise_records': [],
-        'total_calories': 0,
-        'total_protein': 0,
-        'total_burned': 0,
-        'bmr': 1600,
-        'daily_target': 2000,
-        'page_ready': True
-    }
-    for key, default_value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_value
-
-init_session()
+# 初始化 Session State
+if 'user_profile' not in st.session_state:
+    st.session_state.user_profile = {'gender': '男', 'weight': 70, 'height': 170, 'age': 25, 'activity_level': '中等', 'goal': '减脂'}
+if 'food_records' not in st.session_state:
+    st.session_state.food_records = []
+if 'exercise_records' not in st.session_state:
+    st.session_state.exercise_records = []
+if 'total_calories' not in st.session_state:
+    st.session_state.total_calories = 0
+if 'total_protein' not in st.session_state:
+    st.session_state.total_protein = 0
+if 'total_burned' not in st.session_state:
+    st.session_state.total_burned = 0
+if 'bmr' not in st.session_state:
+    st.session_state.bmr = 1600
+if 'daily_target' not in st.session_state:
+    st.session_state.daily_target = 2000
 
 # 计算 BMR
 def calculate_bmr():
@@ -90,175 +78,115 @@ def calculate_bmr():
 
 calculate_bmr()
 
-# 手机端优化 CSS
+# CSS
 st.markdown("""
 <style>
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 0.8rem;
-        border-radius: 12px;
-        margin-bottom: 1rem;
-        text-align: center;
-        color: white;
-    }
-    .main-header h1 {
-        font-size: 1.3rem;
-        margin: 0;
-    }
-    .main-header p {
-        font-size: 0.7rem;
-        margin: 0.3rem 0 0 0;
-    }
-    /* 手机端按钮优化 */
-    @media (max-width: 768px) {
-        .stButton button {
-            width: 100%;
-            padding: 0.4rem;
-            font-size: 0.8rem;
-        }
-        .stNumberInput input {
-            font-size: 0.8rem;
-        }
-        .stSelectbox div {
-            font-size: 0.8rem;
-        }
-        .stColumns {
-            gap: 0.5rem;
-        }
-    }
-    /* 记录卡片样式 */
-    .record-item {
-        background-color: #f8f9fa;
-        padding: 0.4rem;
-        border-radius: 8px;
-        margin-bottom: 0.3rem;
-        font-size: 0.8rem;
-    }
+.main-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1rem;
+    border-radius: 15px;
+    margin-bottom: 1rem;
+    text-align: center;
+    color: white;
+}
+@media (max-width: 768px) {
+    .stButton button { width: 100%; }
+    .stColumns { gap: 0.3rem; }
+}
 </style>
 <div class="main-header">
     <h1>💪 健身营养助手</h1>
-    <p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入vs消耗</p>
+    <p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p>
 </div>
 """, unsafe_allow_html=True)
 
-# 使用单列布局在手机端更好用
-is_mobile = st.query_params.get("mobile", "false") == "true"
+# 三列布局
+col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-if is_mobile:
-    # 手机端：单列布局
-    container = st.container()
-else:
-    # 电脑端：三列布局
-    col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
-
-# ==================== 左侧：个人信息（电脑端）====================
-if not is_mobile:
-    with col_left:
-        st.markdown("### 👤 个人信息")
-        st.info(f"👋 {st.session_state.user_profile['height']}cm / {st.session_state.user_profile['weight']}kg")
-        with st.expander("✏️ 编辑"):
-            g = st.selectbox("性别", ["男", "女"], 0 if st.session_state.user_profile['gender']=='男' else 1)
-            a = st.number_input("年龄", 15, 100, st.session_state.user_profile['age'])
-            h = st.number_input("身高(cm)", 100, 250, st.session_state.user_profile['height'])
-            w = st.number_input("体重(kg)", 30, 200, st.session_state.user_profile['weight'])
-            act = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
-                              index=["低", "中等", "高", "非常高"].index(st.session_state.user_profile['activity_level']))
-            goal = st.selectbox("目标", ["减脂", "保持体重", "增肌"],
-                               index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
-            if st.button("💾 保存"):
-                st.session_state.user_profile = {'gender': g, 'age': a, 'height': h, 'weight': w, 'activity_level': act, 'goal': goal}
-                calculate_bmr()
-                st.rerun()
-        
-        net = st.session_state.total_calories - st.session_state.total_burned
-        remaining = st.session_state.daily_target - net
-        st.metric("🎯 每日目标", f"{st.session_state.daily_target} kcal")
-        col_a, col_b = st.columns(2)
-        col_a.metric("🍽️ 摄入", f"{st.session_state.total_calories:.0f}")
-        col_b.metric("🏋️ 消耗", f"{st.session_state.total_burned:.0f}")
-        if remaining > 0:
-            st.success(f"剩余: {remaining:.0f} kcal")
-            progress_val = min(max(remaining / st.session_state.daily_target, 0), 1)
-            st.progress(progress_val)
-        else:
-            st.error(f"超标: {-remaining:.0f} kcal")
-            st.progress(1.0)
-        
-        if st.button("🗑️ 清空记录"):
-            st.session_state.food_records = []
-            st.session_state.exercise_records = []
-            st.session_state.total_calories = 0
-            st.session_state.total_protein = 0
-            st.session_state.total_burned = 0
+# ==================== 左侧：个人信息 ====================
+with col_left:
+    st.markdown("### 👤 个人信息")
+    st.info(f"{st.session_state.user_profile['height']}cm / {st.session_state.user_profile['weight']}kg / {st.session_state.user_profile['goal']}")
+    with st.expander("✏️ 编辑"):
+        g = st.selectbox("性别", ["男", "女"], 0 if st.session_state.user_profile['gender']=='男' else 1)
+        a = st.number_input("年龄", 15, 100, st.session_state.user_profile['age'])
+        h = st.number_input("身高(cm)", 100, 250, st.session_state.user_profile['height'])
+        w = st.number_input("体重(kg)", 30, 200, st.session_state.user_profile['weight'])
+        act = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
+                          index=["低", "中等", "高", "非常高"].index(st.session_state.user_profile['activity_level']))
+        goal = st.selectbox("目标", ["减脂", "保持体重", "增肌"],
+                           index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
+        if st.button("💾 保存"):
+            st.session_state.user_profile = {'gender': g, 'age': a, 'height': h, 'weight': w, 'activity_level': act, 'goal': goal}
+            calculate_bmr()
             st.rerun()
+    
+    net = st.session_state.total_calories - st.session_state.total_burned
+    remaining = st.session_state.daily_target - net
+    st.metric("🎯 每日目标", f"{st.session_state.daily_target} kcal")
+    col_a, col_b = st.columns(2)
+    col_a.metric("🍽️ 摄入", f"{st.session_state.total_calories:.0f}")
+    col_b.metric("🏋️ 消耗", f"{st.session_state.total_burned:.0f}")
+    if remaining > 0:
+        st.success(f"剩余: {remaining:.0f} kcal")
+        st.progress(min(max(remaining / st.session_state.daily_target, 0), 1))
+    else:
+        st.error(f"超标: {-remaining:.0f} kcal")
+        st.progress(1.0)
+    
+    if st.button("🗑️ 清空记录"):
+        st.session_state.food_records = []
+        st.session_state.exercise_records = []
+        st.session_state.total_calories = 0
+        st.session_state.total_protein = 0
+        st.session_state.total_burned = 0
+        st.rerun()
 
-# ==================== 食物摄入模块 ====================
-if is_mobile:
+# ==================== 中间：食物摄入 ====================
+with col_mid:
     st.markdown("## 🍽️ 食物摄入")
-else:
-    with col_mid:
-        st.markdown("## 🍽️ 食物摄入")
-
-# 统一食物摄入逻辑（手机和电脑共用）
-food_container = st.container() if is_mobile else col_mid
-
-with food_container:
     mode = st.radio("方式", ["🔍 手动", "📸 拍照"], horizontal=True)
     meal = st.selectbox("餐次", ["早餐", "午餐", "晚餐", "加餐"])
-    current_time = get_current_time()
-    st.caption(f"🕐 当前: {current_time}")
+    st.caption(f"🕐 {get_current_time()}")
     
     if mode == "🔍 手动":
-        term = st.text_input("🔍 搜索食物", placeholder="红烧肉、啤酒、奶茶...", key="food_search")
+        term = st.text_input("🔍 搜索食物", placeholder="红烧肉、啤酒、奶茶...")
         if term:
-            results = df_food[df_food['名称'].str.contains(term, na=False)].head(10)
+            results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
             if len(results) == 0:
-                st.warning(f"未找到 '{term}'")
-            for idx, row in results.iterrows():
+                st.warning("未找到")
+            for _, row in results.iterrows():
                 unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
                 config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
                 std_qty = row.get('标准量', 100) if pd.notna(row.get('标准量')) else 100
                 
-                with st.container():
-                    cols = st.columns([2, 0.8, 1.2, 0.8])
-                    cols[0].markdown(f"**{row['名称']}**")
-                    cols[0].caption(f"{row['类别']}")
-                    cols[1].write(f"{row['热量']:.0f}")
-                    
-                    qty = cols[2].number_input(
-                        f"数量({config['label']})",
-                        min_value=config['min'],
-                        max_value=config['max'],
-                        value=config['default'],
-                        step=config['step'],
-                        key=f"qty_{row['名称']}_{idx}_{uuid.uuid4().hex[:4]}",
-                        label_visibility="collapsed"
-                    )
-                    
-                    if unit in ['g', 'ml']:
-                        multiplier = qty / std_qty
-                    else:
-                        multiplier = qty / std_qty
-                    cal = row['热量'] * multiplier
-                    pro = row['蛋白质'] * multiplier
-                    
-                    cols[3].write(f"{cal:.0f}")
-                    
-                    if cols[3].button("➕", key=f"add_{row['名称']}_{idx}_{uuid.uuid4().hex[:4]}"):
-                        st.session_state.food_records.append({
-                            '时间': get_current_time(),
-                            '餐次': meal,
-                            '名称': row['名称'],
-                            '数量': qty,
-                            '单位': unit,
-                            '热量': cal,
-                            '蛋白质': pro
-                        })
-                        st.session_state.total_calories += cal
-                        st.session_state.total_protein += pro
-                        st.success(f"✅ 已添加 {row['名称']}")
-                        st.rerun()
-                    st.divider()
+                cols = st.columns([2, 0.8, 1.2, 0.8])
+                cols[0].markdown(f"**{row['名称']}**")
+                cols[0].caption(row['类别'])
+                cols[1].write(f"{row['热量']:.0f}")
+                
+                qty = cols[2].number_input(
+                    config['label'], 
+                    config['min'], config['max'], config['default'], config['step'],
+                    key=f"qty_{row['名称']}_{uuid.uuid4().hex[:4]}",
+                    label_visibility="collapsed"
+                )
+                
+                multiplier = qty / std_qty
+                cal = row['热量'] * multiplier
+                pro = row['蛋白质'] * multiplier
+                cols[3].write(f"{cal:.0f}")
+                
+                if cols[3].button("➕", key=f"add_{row['名称']}_{uuid.uuid4().hex[:4]}"):
+                    st.session_state.food_records.append({
+                        '时间': get_current_time(), '餐次': meal, '名称': row['名称'],
+                        '数量': qty, '单位': unit, '热量': cal, '蛋白质': pro
+                    })
+                    st.session_state.total_calories += cal
+                    st.session_state.total_protein += pro
+                    st.success(f"✅ 已添加 {row['名称']}")
+                    st.rerun()
+                st.divider()
     
     else:
         recognizer = get_recognizer()
@@ -276,93 +204,70 @@ with food_container:
                         pro = f.get('protein', weight * 0.15)
                         if st.button(f"➕ 添加 {name}"):
                             st.session_state.food_records.append({
-                                '时间': get_current_time(),
-                                '餐次': meal,
-                                '名称': name,
-                                '数量': weight,
-                                '单位': 'g',
-                                '热量': cal,
-                                '蛋白质': pro
+                                '时间': get_current_time(), '餐次': meal, '名称': name,
+                                '数量': weight, '单位': 'g', '热量': cal, '蛋白质': pro
                             })
                             st.session_state.total_calories += cal
                             st.session_state.total_protein += pro
                             st.success(f"✅ 已添加 {name}")
                             st.rerun()
     
-    # 显示今日饮食记录
+    # 显示记录
     st.markdown("---")
     st.markdown("### 📋 今日饮食")
-    
     if len(st.session_state.food_records) > 0:
         for m in ["早餐", "午餐", "晚餐", "加餐"]:
             items = [r for r in st.session_state.food_records if r.get('餐次') == m]
             if items:
                 st.markdown(f"**{m}**")
                 for r in items:
-                    qty = r.get('数量', 0)
                     unit = r.get('单位', 'g')
-                    unit_label = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])['label']
-                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {qty}{unit_label} | {r['热量']:.0f}kcal")
+                    label = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])['label']
+                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['数量']}{label} | {r['热量']:.0f}kcal")
     else:
-        st.info("暂无记录")
+        st.info("暂无")
 
-# ==================== 运动消耗模块 ====================
-if is_mobile:
+# ==================== 右侧：运动消耗 ====================
+with col_right:
     st.markdown("## 🏋️ 运动消耗")
-else:
-    with col_right:
-        st.markdown("## 🏋️ 运动消耗")
-
-exercise_container = st.container() if is_mobile else col_right
-
-with exercise_container:
     mode_ex = st.radio("方式", ["🔍 搜索", "✏️ 自定义", "📸 拍照"], horizontal=True)
-    st.caption(f"🕐 当前: {get_current_time()}")
+    st.caption(f"🕐 {get_current_time()}")
     
     if mode_ex == "🔍 搜索":
         search = st.text_input("🔍 搜索运动", placeholder="深蹲、硬拉...")
         filtered = df_exercise if not search else df_exercise[df_exercise['器材'].str.contains(search, na=False)]
         if len(filtered) == 0:
-            st.warning(f"未找到 '{search}'")
+            st.warning("未找到")
             filtered = df_exercise
-        ex_name = st.selectbox("选择运动", filtered['器材'].tolist())
+        ex_name = st.selectbox("运动", filtered['器材'].tolist())
         ex = df_exercise[df_exercise['器材'] == ex_name].iloc[0]
-        st.caption(f"💡 {ex['说明']} | {ex['消耗系数']} kcal/kg/分钟")
-        dur = st.number_input("分钟", 1, 180, 30, 5, key="dur")
-        extra = st.number_input("负重(kg)", 0, 100, 0, 5, key="extra")
+        st.caption(f"{ex['说明']} | {ex['消耗系数']} kcal/kg/分钟")
+        dur = st.number_input("分钟", 1, 180, 30, 5)
+        extra = st.number_input("负重(kg)", 0, 100, 0, 5)
         cal = ex['消耗系数'] * (st.session_state.user_profile['weight'] + extra) * dur
-        st.info(f"🔥 消耗: **{cal:.0f} kcal**")
-        
+        st.info(f"🔥 {cal:.0f} kcal")
         if st.button("✅ 记录"):
             st.session_state.exercise_records.append({
-                '时间': get_current_time(),
-                '器材': ex_name,
-                '时长': dur,
-                '负重': extra,
-                '消耗': cal
+                '时间': get_current_time(), '器材': ex_name, '时长': dur, '负重': extra, '消耗': cal
             })
             st.session_state.total_burned += cal
-            st.success(f"✅ 已记录 {ex_name}")
+            st.success(f"✅ 已记录")
             st.rerun()
     
     elif mode_ex == "✏️ 自定义":
-        name = st.text_input("运动名称", placeholder="保加利亚深蹲...")
-        coeff = st.number_input("消耗系数", 0.01, 0.50, 0.08, 0.01, key="coeff")
+        name = st.text_input("运动名称")
+        coeff = st.number_input("系数", 0.01, 0.50, 0.08, 0.01)
         dur = st.number_input("分钟", 1, 180, 30, 5, key="c_dur")
-        extra = st.number_input("负重(kg)", 0, 100, 0, 5, key="c_extra")
+        extra = st.number_input("负重", 0, 100, 0, 5, key="c_extra")
         if name:
             cal = coeff * (st.session_state.user_profile['weight'] + extra) * dur
-            st.info(f"🔥 消耗: **{cal:.0f} kcal**")
+            st.info(f"🔥 {cal:.0f} kcal")
             if st.button("✅ 记录"):
                 st.session_state.exercise_records.append({
-                    '时间': get_current_time(),
-                    '器材': name,
-                    '时长': dur,
-                    '负重': extra,
-                    '消耗': cal
+                    '时间': get_current_time(), '器材': name, '时长': dur, '负重': extra, '消耗': cal
                 })
                 st.session_state.total_burned += cal
-                st.success(f"✅ 已记录 {name}")
+                st.success(f"✅ 已记录")
                 st.rerun()
     
     else:
@@ -375,20 +280,16 @@ with exercise_container:
                 res = recognizer.recognize_food("/tmp/ex.jpg")
                 if not res.get("error"):
                     name = res.get("foods", [{}])[0].get('name', '未知')
-                    st.write(f"识别到: {name}")
+                    st.write(f"识别: {name}")
                     dur = st.number_input("分钟", 1, 180, 30, 5, key="r_dur")
                     extra = st.number_input("负重", 0, 100, 0, 5, key="r_extra")
                     if st.button("记录"):
                         cal = 0.08 * (st.session_state.user_profile['weight'] + extra) * dur
                         st.session_state.exercise_records.append({
-                            '时间': get_current_time(),
-                            '器材': name,
-                            '时长': dur,
-                            '负重': extra,
-                            '消耗': cal
+                            '时间': get_current_time(), '器材': name, '时长': dur, '负重': extra, '消耗': cal
                         })
                         st.session_state.total_burned += cal
-                        st.success(f"✅ 已记录 {name}")
+                        st.success("✅ 已记录")
                         st.rerun()
     
     st.markdown("---")
@@ -396,34 +297,10 @@ with exercise_container:
     if len(st.session_state.exercise_records) > 0:
         total_min = sum(r.get('时长', 0) for r in st.session_state.exercise_records)
         st.metric("总时长", f"{total_min} 分钟")
-        for r in st.session_state.exercise_records[-20:]:
+        for r in st.session_state.exercise_records[-15:]:
             st.write(f"  🕐 {r['时间']} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
     else:
-        st.info("暂无记录")
-
-# 手机端额外显示个人信息
-if is_mobile:
-    st.markdown("---")
-    st.markdown("### 👤 个人信息")
-    st.info(f"身高: {st.session_state.user_profile['height']}cm | 体重: {st.session_state.user_profile['weight']}kg | 目标: {st.session_state.user_profile['goal']}")
-    
-    net = st.session_state.total_calories - st.session_state.total_burned
-    remaining = st.session_state.daily_target - net
-    col_a, col_b = st.columns(2)
-    col_a.metric("🍽️ 摄入", f"{st.session_state.total_calories:.0f} kcal")
-    col_b.metric("🏋️ 消耗", f"{st.session_state.total_burned:.0f} kcal")
-    if remaining > 0:
-        st.success(f"剩余: {remaining:.0f} kcal")
-    else:
-        st.error(f"超标: {-remaining:.0f} kcal")
-    
-    if st.button("🗑️ 清空记录"):
-        st.session_state.food_records = []
-        st.session_state.exercise_records = []
-        st.session_state.total_calories = 0
-        st.session_state.total_protein = 0
-        st.session_state.total_burned = 0
-        st.rerun()
+        st.info("暂无")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray;font-size:0.7rem'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 🕐 自动时间</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 🕐 自动时间</p>", unsafe_allow_html=True)
