@@ -6,6 +6,7 @@ from PIL import Image
 import uuid
 import plotly.graph_objects as go
 from supabase import create_client
+import hashlib
 
 from image_recognition import FoodImageRecognizer
 from email_service import send_daily_report_email, is_sendgrid_configured
@@ -31,28 +32,16 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# ==================== 辅助函数 ====================
-def safe_float(value, default=70.0):
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except:
-        return default
-
-def safe_int(value, default=25):
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except:
-        return default
+# ==================== 密码加密 ====================
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
 # ==================== 用户管理 ====================
-def get_or_create_user(email, username=None):
+def create_user(email, password, username=None):
+    """创建新用户"""
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if result.data:
-        return result.data[0]
+        return None, "邮箱已存在"
     
     final_username = username or email.split('@')[0]
     username_check = supabase.table("user_profiles").select("*").eq("username", final_username).execute()
@@ -63,6 +52,7 @@ def get_or_create_user(email, username=None):
         "id": str(uuid.uuid4()),
         "email": email,
         "username": final_username,
+        "password": hash_password(password),
         "weight": 70.0,
         "height": 170.0,
         "gender": "男",
@@ -73,10 +63,21 @@ def get_or_create_user(email, username=None):
     }
     try:
         insert_result = supabase.table("user_profiles").insert(new_user).execute()
-        return insert_result.data[0]
+        return insert_result.data[0], "注册成功"
     except Exception as e:
-        st.error(f"创建用户失败: {e}")
-        return None
+        return None, f"注册失败: {e}"
+
+def login_user(email, password):
+    """用户登录"""
+    result = supabase.table("user_profiles").select("*").eq("email", email).execute()
+    if not result.data:
+        return None, "邮箱不存在"
+    
+    user = result.data[0]
+    if user.get('password') == hash_password(password):
+        return user, "登录成功"
+    else:
+        return None, "密码错误"
 
 def get_user_profile(user_id):
     try:
@@ -94,6 +95,7 @@ def update_user_profile(user_id, profile):
     except:
         return False
 
+# ==================== 数据操作函数 ====================
 def save_food_record(user_id, date_str, meal, food_name, quantity, calories, protein):
     if not user_id:
         return False
@@ -197,9 +199,9 @@ def get_trend_data(user_id, days=30):
         return [], []
 
 def calculate_bmr(weight, height, age, gender):
-    w = safe_float(weight, 70)
-    h = safe_float(height, 170)
-    a = safe_int(age, 25)
+    w = float(weight) if weight else 70
+    h = float(height) if height else 170
+    a = int(age) if age else 25
     if gender == '男':
         return 66 + (13.7 * w) + (5 * h) - (6.8 * a)
     else:
@@ -255,8 +257,6 @@ if 'show_email' not in st.session_state:
     st.session_state.show_email = False
 if 'show_auth' not in st.session_state:
     st.session_state.show_auth = False
-if 'show_profile' not in st.session_state:
-    st.session_state.show_profile = False
 
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = {
@@ -280,15 +280,15 @@ if 'total_burned' not in st.session_state:
 # ==================== 登录/注册弹窗 ====================
 def show_auth_modal():
     st.markdown("### 🔐 登录/注册")
-    st.markdown("登录后可以保存历史记录、查看趋势图表、发送邮件报告")
     
     tab1, tab2 = st.tabs(["登录", "注册"])
     
     with tab1:
         login_email = st.text_input("邮箱", key="login_email")
+        login_password = st.text_input("密码", type="password", key="login_password")
         if st.button("登录", type="primary", use_container_width=True, key="login_btn"):
-            if login_email:
-                user = get_or_create_user(login_email)
+            if login_email and login_password:
+                user, msg = login_user(login_email, login_password)
                 if user:
                     st.session_state.user_id = user['id']
                     st.session_state.user_email = login_email
@@ -310,21 +310,29 @@ def show_auth_modal():
                     st.session_state.show_auth = False
                     st.success("✅ 登录成功！")
                     st.rerun()
+                else:
+                    st.error(msg)
             else:
-                st.warning("请输入邮箱")
+                st.warning("请输入邮箱和密码")
     
     with tab2:
         reg_email = st.text_input("邮箱", key="reg_email")
+        reg_password = st.text_input("密码", type="password", key="reg_password")
+        reg_confirm = st.text_input("确认密码", type="password", key="reg_confirm")
         reg_username = st.text_input("用户名（可选）", key="reg_username", placeholder="留空使用邮箱前缀")
         if st.button("注册", type="primary", use_container_width=True, key="register_btn"):
-            if reg_email:
-                user = get_or_create_user(reg_email, reg_username if reg_username else None)
+            if not reg_email or not reg_password:
+                st.warning("请填写邮箱和密码")
+            elif reg_password != reg_confirm:
+                st.error("两次输入的密码不一致")
+            elif len(reg_password) < 4:
+                st.error("密码至少4位")
+            else:
+                user, msg = create_user(reg_email, reg_password, reg_username if reg_username else None)
                 if user:
                     st.success("✅ 注册成功！请登录")
                 else:
-                    st.error("注册失败，邮箱可能已存在")
-            else:
-                st.warning("请输入邮箱")
+                    st.error(msg)
     
     if st.button("继续试用", use_container_width=True, key="continue_btn"):
         st.session_state.show_auth = False
@@ -359,7 +367,7 @@ with col1:
 with col2:
     if st.session_state.user_id:
         if st.button("📝 资料", use_container_width=True, key="profile_btn"):
-            st.session_state.show_profile = not st.session_state.show_profile
+            st.session_state.show_profile = not st.session_state.get('show_profile', False)
     else:
         if st.button("🔐 登录", use_container_width=True, key="auth_btn"):
             st.session_state.show_auth = True
@@ -387,38 +395,7 @@ if st.session_state.get('show_auth', False):
     show_auth_modal()
     st.stop()
 
-# 个人信息编辑弹窗
-if st.session_state.user_id and st.session_state.get('show_profile', False):
-    with st.expander("📝 编辑个人信息", expanded=True):
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            new_gender = st.selectbox("性别", ["男", "女"], index=0 if st.session_state.user_profile['gender'] == '男' else 1)
-            new_age = st.number_input("年龄", 15, 100, st.session_state.user_profile['age'])
-        with col_p2:
-            new_height = st.number_input("身高(cm)", 100, 250, int(st.session_state.user_profile['height']))
-            new_weight = st.number_input("体重(kg)", 30, 200, int(st.session_state.user_profile['weight']))
-        
-        new_activity = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
-                                    index=["低", "中等", "高", "非常高"].index(st.session_state.user_profile['activity_level']))
-        new_goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
-                               index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
-        
-        if st.button("💾 保存个人信息", use_container_width=True, key="save_profile"):
-            st.session_state.user_profile = {
-                'gender': new_gender, 'age': new_age, 'height': float(new_height),
-                'weight': float(new_weight), 'activity_level': new_activity, 'goal': new_goal
-            }
-            if st.session_state.user_id:
-                update_user_profile(st.session_state.user_id, st.session_state.user_profile)
-            st.success("✅ 已保存")
-            st.session_state.show_profile = False
-            st.rerun()
-        
-        if st.button("关闭", use_container_width=True, key="close_profile"):
-            st.session_state.show_profile = False
-            st.rerun()
-
-# 获取今日数据
+# 个人信息编辑（在左侧栏直接显示）
 today = get_current_date()
 foods = st.session_state.food_records
 exercises = st.session_state.exercise_records
@@ -427,10 +404,10 @@ total_calories = st.session_state.total_calories
 total_burned = st.session_state.total_burned
 
 user_profile = st.session_state.user_profile
-user_weight = safe_float(user_profile.get('weight', 70))
-user_height = safe_float(user_profile.get('height', 170))
+user_weight = float(user_profile.get('weight', 70))
+user_height = float(user_profile.get('height', 170))
 user_gender = user_profile.get('gender', '男')
-user_age = safe_int(user_profile.get('age', 25))
+user_age = int(user_profile.get('age', 25))
 user_activity = user_profile.get('activity_level', '中等')
 user_goal = user_profile.get('goal', '减脂')
 
@@ -450,10 +427,35 @@ st.markdown("---")
 
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧 ====================
+# ==================== 左侧：个人信息（可直接编辑）====================
 with col_left:
     st.markdown("### 👤 个人信息")
-    st.info(f"📏 {int(user_height)}cm | ⚖️ {int(user_weight)}kg | 🎯 {user_goal}")
+    
+    col_w1, col_w2 = st.columns(2)
+    with col_w1:
+        new_weight = st.number_input("体重(kg)", 30, 200, int(user_weight), key="edit_weight")
+        new_height = st.number_input("身高(cm)", 100, 250, int(user_height), key="edit_height")
+        new_age = st.number_input("年龄", 15, 100, user_age, key="edit_age")
+    with col_w2:
+        new_gender = st.selectbox("性别", ["男", "女"], index=0 if user_gender == '男' else 1, key="edit_gender")
+        new_activity = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
+                                    index=["低", "中等", "高", "非常高"].index(user_activity), key="edit_activity")
+        new_goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
+                               index=["减脂", "保持体重", "增肌"].index(user_goal), key="edit_goal")
+    
+    if st.button("💾 保存个人信息", use_container_width=True, key="save_profile"):
+        st.session_state.user_profile = {
+            'weight': float(new_weight),
+            'height': float(new_height),
+            'gender': new_gender,
+            'age': new_age,
+            'activity_level': new_activity,
+            'goal': new_goal
+        }
+        if st.session_state.user_id:
+            update_user_profile(st.session_state.user_id, st.session_state.user_profile)
+        st.success("✅ 已保存")
+        st.rerun()
     
     progress = min(total_calories / daily_target, 1) if daily_target > 0 else 0
     st.progress(progress)
