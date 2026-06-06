@@ -49,10 +49,92 @@ def calculate_bmr(weight, height, age, gender):
     else:
         return 655 + (9.6 * weight) + (1.8 * height) - (4.7 * age)
 
-# ==================== 用户认证 ====================
-def login_page():
-    st.title("💪 健身营养助手")
-    st.markdown("### 欢迎回来！请登录或注册")
+# ==================== 初始化 Session ====================
+if 'mode' not in st.session_state:
+    st.session_state.mode = 'guest'  # guest 或 user
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
+if 'username' not in st.session_state:
+    st.session_state.username = None
+if 'selected_date' not in st.session_state:
+    st.session_state.selected_date = get_current_date()
+if 'food_records' not in st.session_state:
+    st.session_state.food_records = []
+if 'exercise_records' not in st.session_state:
+    st.session_state.exercise_records = []
+if 'total_calories' not in st.session_state:
+    st.session_state.total_calories = 0.0
+if 'total_burned' not in st.session_state:
+    st.session_state.total_burned = 0.0
+if 'user_profile' not in st.session_state:
+    st.session_state.user_profile = {'gender': '男', 'age': 25, 'height': 170, 'weight': 70, 'activity_level': '中等', 'goal': '减脂'}
+
+# 计算每日目标
+def get_daily_target():
+    bmr = calculate_bmr(
+        st.session_state.user_profile['weight'],
+        st.session_state.user_profile['height'],
+        st.session_state.user_profile['age'],
+        st.session_state.user_profile['gender']
+    )
+    activity_factors = {'低': 1.2, '中等': 1.375, '高': 1.55, '非常高': 1.725}
+    tdee = bmr * activity_factors[st.session_state.user_profile['activity_level']]
+    if st.session_state.user_profile['goal'] == '减脂':
+        return tdee - 300
+    elif st.session_state.user_profile['goal'] == '增肌':
+        return tdee + 300
+    else:
+        return tdee
+
+# 保存记录到数据库（仅登录用户）
+def save_to_database():
+    if st.session_state.mode == 'user' and st.session_state.user_id:
+        from database import delete_records_by_date, save_food_record, save_exercise_record
+        
+        delete_records_by_date(st.session_state.user_id, st.session_state.selected_date)
+        
+        for r in st.session_state.food_records:
+            save_food_record(
+                st.session_state.user_id,
+                st.session_state.selected_date,
+                r['餐次'],
+                r['名称'],
+                r['数量'],
+                r.get('单位', 'g'),
+                r['热量'],
+                r.get('蛋白质', 0)
+            )
+        
+        for r in st.session_state.exercise_records:
+            save_exercise_record(
+                st.session_state.user_id,
+                st.session_state.selected_date,
+                r['器材'],
+                r['时长'],
+                r.get('负重', 0),
+                r['消耗']
+            )
+
+# 从数据库加载记录（仅登录用户）
+def load_from_database():
+    if st.session_state.mode == 'user' and st.session_state.user_id:
+        food_records = get_food_records_by_date(st.session_state.user_id, st.session_state.selected_date)
+        exercise_records = get_exercise_records_by_date(st.session_state.user_id, st.session_state.selected_date)
+        
+        st.session_state.food_records = [{
+            '餐次': r[1], '名称': r[2], '数量': r[3], '单位': r[4],
+            '热量': r[5], '蛋白质': r[6]
+        } for r in food_records]
+        st.session_state.exercise_records = [{
+            '器材': r[1], '时长': r[2], '负重': r[3], '消耗': r[4]
+        } for r in exercise_records]
+        st.session_state.total_calories = sum(r[5] for r in food_records)
+        st.session_state.total_burned = sum(r[4] for r in exercise_records)
+
+# ==================== 用户认证弹窗 ====================
+def show_auth_modal():
+    st.markdown("### 🔐 登录/注册")
+    st.markdown("登录后可以保存历史记录、查看趋势图表")
     
     tab1, tab2 = st.tabs(["登录", "注册"])
     
@@ -62,9 +144,14 @@ def login_page():
         if st.button("登录", type="primary", use_container_width=True):
             user_id = verify_user(username, password)
             if user_id:
+                st.session_state.mode = 'user'
                 st.session_state.user_id = user_id
                 st.session_state.username = username
-                st.session_state.logged_in = True
+                # 加载用户个人信息
+                profile = get_user_profile(user_id)
+                if profile:
+                    st.session_state.user_profile = profile
+                load_from_database()
                 st.success(f"✅ 欢迎回来，{username}！")
                 st.rerun()
             else:
@@ -87,117 +174,64 @@ def login_page():
                     st.error("用户名已存在")
 
 def logout():
-    st.session_state.logged_in = False
+    st.session_state.mode = 'guest'
     st.session_state.user_id = None
     st.session_state.username = None
-    st.session_state.food_records = []
-    st.session_state.exercise_records = []
-    st.session_state.total_calories = 0
-    st.session_state.total_burned = 0
+    # 不清空记录，保持当前数据
     st.rerun()
 
-# ==================== 初始化 Session ====================
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = None
-if 'username' not in st.session_state:
-    st.session_state.username = None
-if 'selected_date' not in st.session_state:
-    st.session_state.selected_date = get_current_date()
-if 'food_records' not in st.session_state:
-    st.session_state.food_records = []
-if 'exercise_records' not in st.session_state:
-    st.session_state.exercise_records = []
-if 'total_calories' not in st.session_state:
-    st.session_state.total_calories = 0.0
-if 'total_burned' not in st.session_state:
-    st.session_state.total_burned = 0.0
+# ==================== 用户信息栏 ====================
+def show_user_bar():
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        if st.session_state.mode == 'user':
+            st.caption(f"👤 已登录: {st.session_state.username}")
+        else:
+            st.caption("👤 访客模式 (数据仅保存在本地)")
+    with col2:
+        if st.session_state.mode == 'guest':
+            if st.button("🔐 登录/注册", use_container_width=True):
+                st.session_state.show_auth = True
+        else:
+            if st.button("🚪 退出登录", use_container_width=True):
+                logout()
+    with col3:
+        if st.session_state.mode == 'user':
+            if st.button("💾 立即保存", use_container_width=True):
+                save_to_database()
+                st.success("✅ 已保存")
 
-# 未登录则显示登录页面
-if not st.session_state.logged_in:
-    login_page()
-    st.stop()
-
-# ==================== 已登录用户界面 ====================
-
-# 加载用户个人信息
-user_profile = get_user_profile(st.session_state.user_id)
-if user_profile:
-    st.session_state.user_profile = user_profile
-else:
-    st.session_state.user_profile = {'gender': '男', 'age': 25, 'height': 170, 'weight': 70, 'activity_level': '中等', 'goal': '减脂'}
-
-# 计算每日目标
-bmr = calculate_bmr(
-    st.session_state.user_profile['weight'],
-    st.session_state.user_profile['height'],
-    st.session_state.user_profile['age'],
-    st.session_state.user_profile['gender']
-)
-activity_factors = {'低': 1.2, '中等': 1.375, '高': 1.55, '非常高': 1.725}
-tdee = bmr * activity_factors[st.session_state.user_profile['activity_level']]
-if st.session_state.user_profile['goal'] == '减脂':
-    daily_target = tdee - 300
-elif st.session_state.user_profile['goal'] == '增肌':
-    daily_target = tdee + 300
-else:
-    daily_target = tdee
-daily_target = int(daily_target)
-
-# 加载选中日期的记录
-def load_records_for_date(date):
-    food_records = get_food_records_by_date(st.session_state.user_id, date)
-    exercise_records = get_exercise_records_by_date(st.session_state.user_id, date)
-    
-    total_calories = sum(r[5] for r in food_records)  # calories is index 5
-    total_burned = sum(r[4] for r in exercise_records)  # calories is index 4
-    
-    return food_records, exercise_records, total_calories, total_burned
-
-# 保存当前记录到数据库
-def save_current_records():
-    # 删除当前日期的旧记录
-    from database import delete_records_by_date, save_food_record, save_exercise_record
-    
-    delete_records_by_date(st.session_state.user_id, st.session_state.selected_date)
-    
-    for r in st.session_state.food_records:
-        save_food_record(
-            st.session_state.user_id,
-            st.session_state.selected_date,
-            r['餐次'],
-            r['名称'],
-            r['数量'],
-            r.get('单位', 'g'),
-            r['热量'],
-            r.get('蛋白质', 0)
-        )
-    
-    for r in st.session_state.exercise_records:
-        save_exercise_record(
-            st.session_state.user_id,
-            st.session_state.selected_date,
-            r['器材'],
-            r['时长'],
-            r.get('负重', 0),
-            r['消耗']
-        )
-
-# 页面头部
-st.markdown(f"""
-<div style="display: flex; justify-content: space-between; align-items: center;">
-    <div>
-        <h1>💪 健身营养助手</h1>
-        <p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p>
-    </div>
-    <div>
-        <span style="background: #667eea; padding: 0.5rem 1rem; border-radius: 20px; color: white;">
-            👤 {st.session_state.username}
-        </span>
-    </div>
+# ==================== 页面头部 ====================
+st.markdown("""
+<style>
+.main-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1rem;
+    border-radius: 15px;
+    margin-bottom: 1rem;
+    text-align: center;
+    color: white;
+}
+@media (max-width: 768px) {
+    .stButton button { width: 100%; }
+}
+</style>
+<div class="main-header">
+    <h1>💪 健身营养助手</h1>
+    <p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p>
 </div>
 """, unsafe_allow_html=True)
+
+# 显示用户栏
+show_user_bar()
+
+# 显示认证弹窗
+if st.session_state.get('show_auth', False):
+    show_auth_modal()
+    if st.button("继续试用", use_container_width=True):
+        st.session_state.show_auth = False
+        st.rerun()
+    st.stop()
 
 # 日期选择器
 col_date1, col_date2, col_date3 = st.columns([2, 1, 1])
@@ -210,33 +244,37 @@ with col_date1:
     selected_date_str = selected_date.strftime("%Y-%m-%d")
     
     if selected_date_str != st.session_state.selected_date:
-        # 保存当前日期的数据
-        if st.session_state.food_records or st.session_state.exercise_records:
-            save_current_records()
-        
-        # 加载新日期的数据
+        if st.session_state.mode == 'user' and st.session_state.user_id:
+            save_to_database()
         st.session_state.selected_date = selected_date_str
-        records = load_records_for_date(selected_date_str)
-        st.session_state.food_records = [{
-            '餐次': r[1], '名称': r[2], '数量': r[3], '单位': r[4],
-            '热量': r[5], '蛋白质': r[6]
-        } for r in records[0]]
-        st.session_state.exercise_records = [{
-            '器材': r[1], '时长': r[2], '负重': r[3], '消耗': r[4]
-        } for r in records[1]]
-        st.session_state.total_calories = records[2]
-        st.session_state.total_burned = records[3]
+        if st.session_state.mode == 'user' and st.session_state.user_id:
+            load_from_database()
+        else:
+            # 访客模式：切换日期时清空当前记录（不保存）
+            st.session_state.food_records = []
+            st.session_state.exercise_records = []
+            st.session_state.total_calories = 0
+            st.session_state.total_burned = 0
+        st.rerun()
 
 with col_date2:
     if st.button("📊 历史趋势", use_container_width=True):
-        st.session_state.show_trend = True
+        if st.session_state.mode == 'user':
+            st.session_state.show_trend = True
+        else:
+            st.info("💡 登录后可以查看历史趋势图表")
 
 with col_date3:
     if st.button("📥 导出数据", use_container_width=True):
-        st.session_state.show_export = True
+        if st.session_state.mode == 'user':
+            st.session_state.show_export = True
+        else:
+            st.info("💡 登录后可以导出数据")
 
-# 显示当前日期
 st.caption(f"📅 当前记录日期: {selected_date_str}")
+
+# 计算每日目标
+daily_target = int(get_daily_target())
 
 # 三列布局
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
@@ -256,7 +294,8 @@ with col_left:
                            index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
         if st.button("💾 保存"):
             st.session_state.user_profile = {'gender': g, 'age': a, 'height': h, 'weight': w, 'activity_level': act, 'goal': goal}
-            save_user_profile(st.session_state.user_id, st.session_state.user_profile)
+            if st.session_state.mode == 'user' and st.session_state.user_id:
+                save_user_profile(st.session_state.user_id, st.session_state.user_profile)
             st.success("✅ 已保存")
             st.rerun()
     
@@ -278,11 +317,9 @@ with col_left:
         st.session_state.exercise_records = []
         st.session_state.total_calories = 0.0
         st.session_state.total_burned = 0.0
-        save_current_records()
+        if st.session_state.mode == 'user' and st.session_state.user_id:
+            save_to_database()
         st.rerun()
-    
-    if st.button("🚪 退出登录"):
-        logout()
 
 # ==================== 中间：食物摄入 ====================
 with col_mid:
@@ -328,7 +365,8 @@ with col_mid:
                         '蛋白质': pro
                     })
                     st.session_state.total_calories += cal
-                    save_current_records()
+                    if st.session_state.mode == 'user' and st.session_state.user_id:
+                        save_to_database()
                     st.success(f"✅ 已添加 {row['名称']}")
                     st.rerun()
                 st.divider()
@@ -363,7 +401,8 @@ with col_mid:
                                         '蛋白质': pro
                                     })
                                     st.session_state.total_calories += cal
-                                    save_current_records()
+                                    if st.session_state.mode == 'user' and st.session_state.user_id:
+                                        save_to_database()
                                     st.success(f"✅ 已添加 {name}")
                                     st.rerun()
     
@@ -409,7 +448,8 @@ with col_right:
                 '消耗': cal
             })
             st.session_state.total_burned += cal
-            save_current_records()
+            if st.session_state.mode == 'user' and st.session_state.user_id:
+                save_to_database()
             st.success(f"✅ 已记录 {ex_name}")
             st.rerun()
     
@@ -429,7 +469,8 @@ with col_right:
                     '消耗': cal
                 })
                 st.session_state.total_burned += cal
-                save_current_records()
+                if st.session_state.mode == 'user' and st.session_state.user_id:
+                    save_to_database()
                 st.success(f"✅ 已记录 {name}")
                 st.rerun()
     
@@ -455,7 +496,8 @@ with col_right:
                             '消耗': cal
                         })
                         st.session_state.total_burned += cal
-                        save_current_records()
+                        if st.session_state.mode == 'user' and st.session_state.user_id:
+                            save_to_database()
                         st.success("✅ 已记录")
                         st.rerun()
     
@@ -474,16 +516,13 @@ if st.session_state.get('show_trend', False):
     st.markdown("---")
     st.markdown("## 📈 历史热量趋势")
     
-    # 获取最近30天的数据
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     
     food_df, exercise_df = get_date_range_summary(st.session_state.user_id, start_date, end_date)
     
     if len(food_df) > 0 or len(exercise_df) > 0:
-        # 合并数据
         all_dates = set(food_df['record_date'].tolist()) | set(exercise_df['record_date'].tolist())
-        
         trend_data = []
         for date in sorted(all_dates):
             calories = food_df[food_df['record_date'] == date]['total_calories'].sum() if len(food_df) > 0 else 0
@@ -492,7 +531,6 @@ if st.session_state.get('show_trend', False):
         
         trend_df = pd.DataFrame(trend_data)
         
-        # 绘制折线图
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=trend_df['日期'], y=trend_df['摄入'], mode='lines+markers', name='摄入热量', line=dict(color='#ff6b6b', width=2)))
         fig.add_trace(go.Scatter(x=trend_df['日期'], y=trend_df['消耗'], mode='lines+markers', name='消耗热量', line=dict(color='#4ecdc4', width=2)))
@@ -540,4 +578,4 @@ if st.session_state.get('show_export', False):
         st.rerun()
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 📅 历史记录保存</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 💾 登录后可保存历史</p>", unsafe_allow_html=True)
