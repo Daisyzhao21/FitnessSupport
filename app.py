@@ -437,7 +437,30 @@ def show_auth_modal():
             else:
                 success, msg = verify_email(reg_email, reg_code)
                 if success:
-                    st.success("✅ 注册成功！请登录")
+                    # 自动登录
+                    user_result = supabase.table("user_profiles").select("*").eq("email", reg_email).execute()
+                    if user_result.data:
+                        user = user_result.data[0]
+                        st.session_state.user_id = user["id"]
+                        st.session_state.user_email = reg_email
+                        profile = get_user_profile(user["id"])
+                        if profile:
+                            st.session_state.user_profile = {
+                                "weight": profile.get("weight", 70),
+                                "height": profile.get("height", 170),
+                                "gender": profile.get("gender", "男"),
+                                "age": profile.get("age", 25),
+                                "activity_level": profile.get("activity_level", "中等"),
+                                "goal": profile.get("goal", "减脂")
+                            }
+                        today = get_current_date()
+                        st.session_state.food_records = get_food_records(user["id"], today)
+                        st.session_state.exercise_records = get_exercise_records(user["id"], today)
+                        st.session_state.total_calories = sum(f.get("calories", 0) for f in st.session_state.food_records)
+                        st.session_state.total_burned = sum(e.get("calories", 0) for e in st.session_state.exercise_records)
+                        st.session_state.show_auth = False
+                        st.success("✅ 注册成功！已自动登录")
+                        st.rerun()
                 else:
                     st.error(msg)
     
