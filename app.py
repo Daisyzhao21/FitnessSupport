@@ -4,65 +4,20 @@ import os
 from datetime import datetime
 from PIL import Image
 import uuid
-import json
 
 from image_recognition import FoodImageRecognizer
 
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
-# 版本号 - 强制刷新缓存
-APP_VERSION = "2.0.2"
+# 版本号
+APP_VERSION = "2.0.3"
 if 'app_version' not in st.session_state or st.session_state.app_version != APP_VERSION:
     st.session_state.clear()
     st.session_state.app_version = APP_VERSION
 
-# 使用 JavaScript 获取用户本地时间
-def get_user_local_time():
-    """通过前端 JavaScript 获取用户本地时间"""
-    # 注入 JavaScript 获取本地时间
-    js_code = """
-    <script>
-    function getUserTime() {
-        const now = new Date();
-        const hours = now.getHours().toString().padStart(2, '0');
-        const minutes = now.getMinutes().toString().padStart(2, '0');
-        const timeStr = hours + ':' + minutes;
-        
-        // 存储到 sessionStorage
-        sessionStorage.setItem('user_local_time', timeStr);
-        sessionStorage.setItem('user_timezone_offset', now.getTimezoneOffset());
-        
-        // 通过 URL 参数传递（备用）
-        const url = new URL(window.location.href);
-        url.searchParams.set('local_time', timeStr);
-        window.history.replaceState({}, '', url);
-        
-        return timeStr;
-    }
-    getUserTime();
-    </script>
-    """
-    st.markdown(js_code, unsafe_allow_html=True)
-    
-    # 尝试从 query params 获取时间
-    query_params = st.query_params
-    if 'local_time' in query_params:
-        return query_params['local_time']
-    
-    # 默认返回当前时间（服务器时间）
-    return datetime.now().strftime("%H:%M")
-
-# 简化版 - 直接使用 Python 的本地时间（Streamlit Cloud 会用 UTC）
-# 改用浏览器本地时间
-def get_current_time():
-    # 尝试从 localStorage 获取用户时间
-    import streamlit as st
-    user_time = st.query_params.get("local_time", None)
-    if user_time:
-        return user_time
-    return datetime.now().strftime("%H:%M")
-    """获取用户本地时间（通过 JavaScript）"""
-    return get_user_local_time()
+# 获取当前日期
+def get_current_date():
+    return datetime.now().strftime("%m/%d")
 
 # 加载数据
 @st.cache_data
@@ -198,7 +153,7 @@ with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动", "📸 拍照"], horizontal=True)
     meal = st.selectbox("餐次", ["早餐", "午餐", "晚餐", "加餐"])
-    st.caption(f"🕐 {get_current_time()}")
+    st.caption(f"📅 {get_current_date()}")
     
     if mode == "🔍 手动":
         term = st.text_input("🔍 搜索食物", placeholder="鸡腿肉、卤牛肉、鸡胸肉、西兰花...")
@@ -230,7 +185,7 @@ with col_mid:
                 
                 if cols[3].button("➕", key=f"add_{row['名称']}"):
                     st.session_state.food_records.append({
-                        '时间': get_current_time(),
+                        '日期': get_current_date(),
                         '餐次': meal,
                         '名称': row['名称'],
                         '数量': qty,
@@ -266,7 +221,7 @@ with col_mid:
                                 pro = f.get('protein', weight * 0.15)
                                 if st.button(f"➕ 添加 {name}"):
                                     st.session_state.food_records.append({
-                                        '时间': get_current_time(),
+                                        '日期': get_current_date(),
                                         '餐次': meal,
                                         '名称': name,
                                         '数量': weight,
@@ -291,7 +246,7 @@ with col_mid:
                 for r in items:
                     unit = r.get('单位', 'g')
                     label = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])['label']
-                    st.write(f"  🕐 {r['时间']} | {r['名称']} | {r['数量']}{label} | {r['热量']:.0f}kcal")
+                    st.write(f"  📅 {r.get('日期', '今天')} | {r['名称']} | {r['数量']}{label} | {r['热量']:.0f}kcal")
     else:
         st.info("暂无记录，请搜索添加食物")
 
@@ -299,7 +254,7 @@ with col_mid:
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 搜索", "✏️ 自定义", "📸 拍照"], horizontal=True)
-    st.caption(f"🕐 {get_current_time()}")
+    st.caption(f"📅 {get_current_date()}")
     
     if mode_ex == "🔍 搜索":
         search = st.text_input("🔍 搜索运动", placeholder="深蹲、硬拉...")
@@ -316,7 +271,7 @@ with col_right:
         st.info(f"🔥 {cal:.0f} kcal")
         if st.button("✅ 记录"):
             st.session_state.exercise_records.append({
-                '时间': get_current_time(),
+                '日期': get_current_date(),
                 '器材': ex_name,
                 '时长': dur,
                 '负重': extra,
@@ -336,7 +291,7 @@ with col_right:
             st.info(f"🔥 {cal:.0f} kcal")
             if st.button("✅ 记录"):
                 st.session_state.exercise_records.append({
-                    '时间': get_current_time(),
+                    '日期': get_current_date(),
                     '器材': name,
                     '时长': dur,
                     '负重': extra,
@@ -362,7 +317,7 @@ with col_right:
                     if st.button("记录"):
                         cal = 0.08 * (st.session_state.user_profile['weight'] + extra) * dur
                         st.session_state.exercise_records.append({
-                            '时间': get_current_time(),
+                            '日期': get_current_date(),
                             '器材': name,
                             '时长': dur,
                             '负重': extra,
@@ -378,9 +333,9 @@ with col_right:
         total_min = sum(r.get('时长', 0) for r in st.session_state.exercise_records)
         st.metric("总时长", f"{total_min} 分钟")
         for r in st.session_state.exercise_records[-15:]:
-            st.write(f"  🕐 {r['时间']} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
+            st.write(f"  📅 {r.get('日期', '今天')} | {r['器材']} | {r['时长']}分钟 | 🔥 {r['消耗']:.0f}kcal")
     else:
         st.info("暂无运动记录")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 🕐 自动使用本地时间</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 📅 记录日期</p>", unsafe_allow_html=True)
