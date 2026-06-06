@@ -30,6 +30,25 @@ def init_supabase():
 
 supabase = init_supabase()
 
+# ==================== 辅助函数 ====================
+def safe_float(value, default=70.0):
+    """安全转换为浮点数"""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(value, default=25):
+    """安全转换为整数"""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
 # ==================== 用户管理 ====================
 def get_or_create_user(email, username=None):
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
@@ -46,8 +65,8 @@ def get_or_create_user(email, username=None):
         "email": email,
         "username": final_username,
         "created_at": datetime.now().isoformat(),
-        "weight": 70,
-        "height": 170,
+        "weight": 70.0,
+        "height": 170.0,
         "gender": "男",
         "age": 25,
         "activity_level": "中等",
@@ -68,7 +87,7 @@ def get_user_profile(user_id):
             return result.data[0]
     except:
         pass
-    return {'weight': 70, 'height': 170, 'gender': '男', 'age': 25, 'activity_level': '中等', 'goal': '减脂'}
+    return {'weight': 70.0, 'height': 170.0, 'gender': '男', 'age': 25, 'activity_level': '中等', 'goal': '减脂'}
 
 def update_user_profile(user_id, profile):
     try:
@@ -204,15 +223,22 @@ def get_current_date():
     return date.today().strftime("%Y-%m-%d")
 
 def calculate_bmr(weight, height, age, gender):
+    """计算基础代谢率 - 确保数值类型"""
+    w = safe_float(weight, 70)
+    h = safe_float(height, 170)
+    a = safe_int(age, 25)
+    
     if gender == '男':
-        return 66 + (13.7 * weight) + (5 * height) - (6.8 * age)
+        return 66 + (13.7 * w) + (5 * h) - (6.8 * a)
     else:
-        return 655 + (9.6 * weight) + (1.8 * height) - (4.7 * age)
+        return 655 + (9.6 * w) + (1.8 * h) - (4.7 * a)
 
 def get_daily_target(weight, height, age, gender, activity_level, goal):
+    """计算每日目标热量"""
     bmr = calculate_bmr(weight, height, age, gender)
     activity_factors = {'低': 1.2, '中等': 1.375, '高': 1.55, '非常高': 1.725}
     tdee = bmr * activity_factors.get(activity_level, 1.375)
+    
     if goal == '减脂':
         return tdee - 300
     elif goal == '增肌':
@@ -292,10 +318,10 @@ total_burned = sum(e.get('calories', 0) for e in exercises)
 
 # 获取用户资料
 user_profile = get_user_profile(st.session_state.user_id)
-user_weight = user_profile.get('weight', 70)
-user_height = user_profile.get('height', 170)
+user_weight = safe_float(user_profile.get('weight', 70))
+user_height = safe_float(user_profile.get('height', 170))
 user_gender = user_profile.get('gender', '男')
-user_age = user_profile.get('age', 25)
+user_age = safe_int(user_profile.get('age', 25))
 user_activity = user_profile.get('activity_level', '中等')
 user_goal = user_profile.get('goal', '减脂')
 
@@ -319,7 +345,7 @@ st.markdown("---")
 # ==================== 三列布局 ====================
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧：个人信息（完整版）====================
+# ==================== 左侧：个人信息 ====================
 with col_left:
     st.markdown("### 👤 个人信息")
     
@@ -329,8 +355,8 @@ with col_left:
             new_gender = st.selectbox("性别", ["男", "女"], index=0 if user_gender == '男' else 1)
             new_age = st.number_input("年龄", 15, 100, user_age)
         with col_g2:
-            new_height = st.number_input("身高(cm)", 100, 250, user_height)
-            new_weight = st.number_input("体重(kg)", 30, 200, user_weight)
+            new_height = st.number_input("身高(cm)", 100, 250, int(user_height))
+            new_weight = st.number_input("体重(kg)", 30, 200, int(user_weight))
         
         new_activity = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
                                     index=["低", "中等", "高", "非常高"].index(user_activity))
@@ -341,8 +367,8 @@ with col_left:
             new_profile = {
                 "gender": new_gender,
                 "age": new_age,
-                "height": new_height,
-                "weight": new_weight,
+                "height": float(new_height),
+                "weight": float(new_weight),
                 "activity_level": new_activity,
                 "goal": new_goal
             }
@@ -350,10 +376,8 @@ with col_left:
             st.success("✅ 个人信息已保存")
             st.rerun()
     
-    # 显示当前信息摘要
-    st.info(f"📏 {user_height}cm | ⚖️ {user_weight}kg | 🎯 {user_goal}")
+    st.info(f"📏 {int(user_height)}cm | ⚖️ {int(user_weight)}kg | 🎯 {user_goal}")
     
-    # 进度条
     st.markdown("#### 📊 今日进度")
     progress = min(max(total_calories / daily_target, 0), 1) if daily_target > 0 else 0
     st.progress(progress)
@@ -436,7 +460,6 @@ with col_mid:
                                     st.rerun()
         else:
             st.warning("⚠️ 未配置 API Key，拍照识别功能不可用")
-            st.info("请在终端设置: export QWEN_API_KEY='你的key'")
     
     # 显示今日饮食记录
     st.markdown("---")
@@ -455,9 +478,9 @@ with col_mid:
                             delete_food_record(f['id'])
                             st.rerun()
     else:
-        st.info("暂无记录，请搜索添加食物")
+        st.info("暂无记录")
 
-# ==================== 右侧：运动消耗（完整版）====================
+# ==================== 右侧：运动消耗 ====================
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 选择器材", "✏️ 自定义运动", "📸 拍照识别"], horizontal=True)
@@ -607,7 +630,6 @@ if st.session_state.get('show_export', False):
         export_end = st.date_input("结束日期", date.today())
     
     if st.button("生成 CSV", use_container_width=True):
-        # 获取指定日期范围的数据
         start_str = export_start.strftime("%Y-%m-%d")
         end_str = export_end.strftime("%Y-%m-%d")
         
