@@ -731,3 +731,87 @@ def show_user_info():
                 with col2:
                     if st.button("绑定支付宝", use_container_width=True):
                         st.info("支付宝绑定功能开发中")
+
+# ==================== 真实验证码功能 ====================
+from verification_service import send_verification_code, verify_verification_code
+
+def show_auth_modal_real():
+    """显示登录/注册弹窗（真实验证码版）"""
+    st.markdown("### 🔐 登录/注册")
+    st.markdown("支持邮箱、手机号注册")
+    
+    tab1, tab2, tab3 = st.tabs(["登录", "邮箱注册", "手机号注册"])
+    
+    # 登录界面（同上）
+    with tab1:
+        # ... 登录代码保持不变 ...
+        pass
+    
+    # ==================== 邮箱注册（真实验证码） ====================
+    with tab2:
+        reg_email = st.text_input("邮箱", key="reg_email_real")
+        reg_username = st.text_input("用户名（可选）", key="reg_username_real", placeholder="留空则使用邮箱前缀")
+        reg_password = st.text_input("密码", type="password", key="reg_password_real")
+        confirm_password = st.text_input("确认密码", type="password", key="reg_confirm_real")
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            verify_code = st.text_input("验证码", key="reg_code_real", placeholder="请输入验证码")
+        with col2:
+            if st.button("获取验证码", key="get_code_email", use_container_width=True):
+                success, msg = send_verification_code(reg_email, 'email')
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+        
+        if st.button("注册", type="primary", use_container_width=True, key="register_email"):
+            if reg_password != confirm_password:
+                st.error("两次输入的密码不一致")
+            elif len(reg_password) < 4:
+                st.error("密码至少4位")
+            else:
+                # 验证验证码
+                valid, msg = verify_verification_code(reg_email, verify_code, 'email')
+                if not valid:
+                    st.error(msg)
+                else:
+                    user_id, msg = create_user_by_email(reg_email, reg_password, reg_username if reg_username else None)
+                    if user_id:
+                        st.success("✅ 注册成功！请登录")
+                    else:
+                        st.error(msg)
+    
+    # ==================== 手机号注册（真实验证码） ====================
+    with tab3:
+        reg_phone = st.text_input("手机号", key="reg_phone_real", placeholder="11位手机号")
+        reg_username2 = st.text_input("用户名（可选）", key="reg_username2_real", placeholder="留空则自动生成")
+        reg_password2 = st.text_input("密码", type="password", key="reg_password2_real")
+        confirm_password2 = st.text_input("确认密码", type="password", key="reg_confirm2_real")
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            verify_code2 = st.text_input("验证码", key="reg_code2_real", placeholder="请输入验证码")
+        with col2:
+            if st.button("获取验证码", key="get_code_phone", use_container_width=True):
+                success, msg = send_verification_code(reg_phone, 'sms')
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+        
+        if st.button("注册", type="primary", use_container_width=True, key="register_phone"):
+            if reg_password2 != confirm_password2:
+                st.error("两次输入的密码不一致")
+            elif len(reg_password2) < 4:
+                st.error("密码至少4位")
+            else:
+                valid, msg = verify_verification_code(reg_phone, verify_code2, 'sms')
+                if not valid:
+                    st.error(msg)
+                else:
+                    user_id, msg = create_user_by_phone(reg_phone, reg_password2, reg_username2 if reg_username2 else None)
+                    if user_id:
+                        st.success("✅ 注册成功！请登录")
+                    else:
+                        st.error(msg)
