@@ -48,13 +48,19 @@ def safe_int(value, default=25):
         return default
 
 def safe_value(value, min_val, max_val, default):
-    """确保值在范围内"""
     val = safe_float(value, default)
     if val < min_val:
-        return default
+        return float(default)
     if val > max_val:
-        return default
+        return float(default)
     return val
+
+def safe_index(value, options, default_index=0):
+    """安全获取列表索引"""
+    try:
+        return options.index(value)
+    except (ValueError, AttributeError):
+        return default_index
 
 # ==================== 用户管理 ====================
 def get_or_create_user(email, username=None):
@@ -118,8 +124,7 @@ def save_food_record(user_id, record_date, meal, food_name, quantity, unit, calo
         }
         supabase.table("food_records").insert(data).execute()
         return True
-    except Exception as e:
-        print(f"保存失败: {e}")
+    except:
         return False
 
 def get_food_records(user_id, record_date):
@@ -321,14 +326,24 @@ exercises = get_exercise_records(st.session_state.user_id, today)
 total_calories = sum(f.get('calories', 0) for f in foods)
 total_burned = sum(e.get('calories', 0) for e in exercises)
 
-# 获取用户资料 - 确保值在有效范围内
+# 获取用户资料
 user_profile = get_user_profile(st.session_state.user_id)
 user_weight = safe_value(user_profile.get('weight'), 30, 200, 70)
 user_height = safe_value(user_profile.get('height'), 100, 250, 170)
 user_gender = user_profile.get('gender', '男')
 user_age = safe_int(user_profile.get('age'), 25)
+
+# 安全获取 activity_level 和 goal
+valid_activities = ["低", "中等", "高", "非常高"]
+valid_goals = ["减脂", "保持体重", "增肌"]
+
 user_activity = user_profile.get('activity_level', '中等')
+if user_activity not in valid_activities:
+    user_activity = "中等"
+
 user_goal = user_profile.get('goal', '减脂')
+if user_goal not in valid_goals:
+    user_goal = "减脂"
 
 # 计算每日目标
 daily_target = int(get_daily_target(user_weight, user_height, user_age, user_gender, user_activity, user_goal))
@@ -363,10 +378,8 @@ with col_left:
             new_height = st.number_input("身高(cm)", 100, 250, int(user_height))
             new_weight = st.number_input("体重(kg)", 30, 200, int(user_weight))
         
-        new_activity = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
-                                    index=["低", "中等", "高", "非常高"].index(user_activity))
-        new_goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
-                               index=["减脂", "保持体重", "增肌"].index(user_goal))
+        new_activity = st.selectbox("活动水平", valid_activities, index=safe_index(user_activity, valid_activities, 1))
+        new_goal = st.selectbox("健身目标", valid_goals, index=safe_index(user_goal, valid_goals, 0))
         
         if st.button("💾 保存个人信息", use_container_width=True):
             new_profile = {
