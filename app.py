@@ -248,13 +248,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 登录
+# 初始化 session state
 if 'user_id' not in st.session_state:
     st.session_state.user_id = None
-if 'show_email' not in st.session_state:
+if 'show_trend' not in st.session_state:
     st.session_state.show_trend = False
+if 'show_email' not in st.session_state:
     st.session_state.show_email = False
 
+# 登录
 if not st.session_state.user_id:
     st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
     st.markdown("### 🔐 登录/注册")
@@ -276,7 +278,7 @@ if not st.session_state.user_id:
 # ==================== 主界面 ====================
 st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
 
-# 用户信息栏 - 4个按钮
+# 用户信息栏
 col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
 with col1:
     st.caption(f"👤 {st.session_state.get('user_email', '用户')}")
@@ -536,7 +538,7 @@ with col_right:
         st.info("暂无运动记录")
 
 # ==================== 历史趋势弹窗 ====================
-if st.session_state.get('show_trend', False):
+if st.session_state.show_trend:
     st.markdown("---")
     st.markdown("## 📈 历史趋势")
     food_trend, exercise_trend = get_trend_data(st.session_state.user_id)
@@ -566,12 +568,12 @@ if st.session_state.get('show_trend', False):
     else:
         st.info("暂无数据")
     
-    if st.button("关闭"):
+    if st.button("关闭历史趋势"):
         st.session_state.show_trend = False
         st.rerun()
 
 # ==================== 邮件发送弹窗 ====================
-if st.session_state.get('show_email', False):
+if st.session_state.show_email:
     st.markdown("---")
     st.markdown("## 📧 发送每日报告")
     
@@ -579,7 +581,7 @@ if st.session_state.get('show_email', False):
     
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("发送报告", type="primary", use_container_width=True):
+        if st.button("📧 发送报告", type="primary", use_container_width=True):
             if email_address:
                 with st.spinner("正在发送..."):
                     success, msg = send_daily_report_email(
@@ -604,7 +606,7 @@ if st.session_state.get('show_email', False):
             st.rerun()
     
     if not is_sendgrid_configured():
-        st.info("💡 邮件服务配置中，请联系管理员配置 SendGrid")
+        st.info("💡 邮件服务配置中，请在 Secrets 中添加 SENDGRID_API_KEY 和 SENDGRID_FROM_EMAIL")
 
 st.markdown("---")
 st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存</p>", unsafe_allow_html=True)
