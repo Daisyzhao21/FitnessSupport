@@ -87,28 +87,33 @@ def show_auth_sidebar():
             tab1, tab2 = st.tabs(["登录", "注册"])
             
             with tab1:
-                login_user = st.text_input("用户名", key="login_user", placeholder="请输入用户名")
-                login_pass = st.text_input("密码", type="password", key="login_pass", placeholder="请输入密码")
+                login_username = st.text_input("用户名", key="login_username_input", placeholder="请输入用户名")
+                login_password = st.text_input("密码", type="password", key="login_password_input", placeholder="请输入密码")
                 if st.button("登录", key="login_btn", use_container_width=True):
-                    result = login_user(login_user, login_pass)
-                    if result:
-                        st.session_state.logged_in = True
-                        st.session_state.user_id = result[0]
-                        st.session_state.username = result[1]
-                        st.success(f"✅ 欢迎回来，{result[1]}！")
-                        st.rerun()
+                    if login_username and login_password:
+                        result = login_user(login_username, login_password)
+                        if result:
+                            st.session_state.logged_in = True
+                            st.session_state.user_id = result[0]
+                            st.session_state.username = result[1]
+                            st.success(f"✅ 欢迎回来，{result[1]}！")
+                            st.rerun()
+                        else:
+                            st.error("用户名或密码错误")
                     else:
-                        st.error("用户名或密码错误")
+                        st.warning("请输入用户名和密码")
             
             with tab2:
-                new_user = st.text_input("用户名", key="new_user", placeholder="至少3个字符")
-                new_pass = st.text_input("密码", type="password", key="new_pass", placeholder="至少4个字符")
-                confirm_pass = st.text_input("确认密码", type="password", key="confirm_pass", placeholder="再次输入密码")
+                new_username = st.text_input("用户名", key="new_username_input", placeholder="至少3个字符")
+                new_password = st.text_input("密码", type="password", key="new_password_input", placeholder="至少4个字符")
+                confirm_password = st.text_input("确认密码", type="password", key="confirm_password_input", placeholder="再次输入密码")
                 if st.button("注册", key="register_btn", use_container_width=True):
-                    if new_pass != confirm_pass:
+                    if not new_username or not new_password:
+                        st.warning("请填写用户名和密码")
+                    elif new_password != confirm_password:
                         st.error("两次输入的密码不一致")
                     else:
-                        success, msg = register_user(new_user, new_pass)
+                        success, msg = register_user(new_username, new_password)
                         if success:
                             st.success(msg + "，请登录")
                         else:
