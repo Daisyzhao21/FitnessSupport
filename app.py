@@ -13,48 +13,76 @@ st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wi
 
 # ==================== Supabase 连接 ====================
 def init_supabase():
-    """初始化 Supabase 连接（兼容本地和云端）"""
-    # 优先使用 st.secrets（Streamlit Cloud）
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
-        print("使用 st.secrets 配置")
-    except Exception as e:
-        # 本地开发：从 .streamlit/secrets.toml 读取
+    except:
         try:
             import toml
             with open('.streamlit/secrets.toml', 'r') as f:
                 config = toml.load(f)
             url = config["SUPABASE_URL"]
             key = config["SUPABASE_KEY"]
-            print("使用本地 secrets.toml 配置")
-        except Exception as e2:
-            st.error("无法加载 Supabase 配置，请检查 secrets")
+        except:
+            st.error("无法加载 Supabase 配置")
             st.stop()
-    
     return create_client(url, key)
 
 supabase = init_supabase()
 
-# ==================== 数据操作函数 ====================
+# ==================== 修复后的用户管理 ====================
 def get_or_create_user(email, username=None):
+    """获取或创建用户 - 处理重复用户名"""
+    # 先按邮箱查询
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
+    
     if result.data:
+        # 用户已存在，直接返回
         return result.data[0]
-    else:
-        new_user = {
-            "id": str(uuid.uuid4()),
-            "email": email,
-            "username": username or email.split('@')[0],
-            "created_at": datetime.now().isoformat()
-        }
-        try:
-            insert_result = supabase.table("user_profiles").insert(new_user).execute()
-            return insert_result.data[0] if insert_result.data else None
-        except Exception as e:
-            st.error(f"创建用户失败: {e}")
-            return None
+    
+    # 用户不存在，创建新用户
+    # 处理用户名重复
+    final_username = username or email.split('@')[0]
+    
+    # 检查用户名是否已存在
+    username_check = supabase.table("user_profiles").select("*").eq("username", final_username).execute()
+    if username_check.data:
+        # 用户名已存在，添加随机后缀
+        final_username = f"{final_username}_{uuid.uuid4().hex[:4]}"
+    
+    new_user = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "username": final_username,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    try:
+        insert_result = supabase.table("user_profiles").insert(new_user).execute()
+        return insert_result.data[0] if insert_result.data else None
+    except Exception as e:
+        st.error(f"创建用户失败: {e}")
+        return None
 
+def get_user_weight(user_id):
+    """获取用户体重"""
+    try:
+        result = supabase.table("user_profiles").select("weight").eq("id", user_id).execute()
+        if result.data:
+            return result.data[0].get('weight', 70)
+    except:
+        pass
+    return 70
+
+def update_user_weight(user_id, weight):
+    """更新用户体重"""
+    try:
+        supabase.table("user_profiles").update({"weight": weight}).eq("id", user_id).execute()
+        return True
+    except:
+        return False
+
+# ==================== 数据操作函数 ====================
 def save_food_record(user_id, record_date, meal, food_name, quantity, unit, calories, protein):
     try:
         data = {
@@ -82,16 +110,14 @@ def get_food_records(user_id, record_date):
             .order("created_at")\
             .execute()
         return result.data if result.data else []
-    except Exception as e:
-        print(f"查询失败: {e}")
+    except:
         return []
 
 def delete_food_record(record_id):
     try:
         supabase.table("food_records").delete().eq("id", record_id).execute()
         return True
-    except Exception as e:
-        print(f"删除失败: {e}")
+    except:
         return False
 
 def save_exercise_record(user_id, record_date, exercise_name, duration, extra_weight, calories):
@@ -106,8 +132,7 @@ def save_exercise_record(user_id, record_date, exercise_name, duration, extra_we
         }
         supabase.table("exercise_records").insert(data).execute()
         return True
-    except Exception as e:
-        print(f"保存失败: {e}")
+    except:
         return False
 
 def get_exercise_records(user_id, record_date):
@@ -119,16 +144,14 @@ def get_exercise_records(user_id, record_date):
             .order("created_at")\
             .execute()
         return result.data if result.data else []
-    except Exception as e:
-        print(f"查询失败: {e}")
+    except:
         return []
 
 def delete_exercise_record(record_id):
     try:
         supabase.table("exercise_records").delete().eq("id", record_id).execute()
         return True
-    except Exception as e:
-        print(f"删除失败: {e}")
+    except:
         return False
 
 def get_trend_data(user_id, days=30):
@@ -152,8 +175,7 @@ def get_trend_data(user_id, days=30):
             .execute()
         
         return food_result.data, exercise_result.data
-    except Exception as e:
-        print(f"获取趋势失败: {e}")
+    except:
         return [], []
 
 # ==================== 加载食物运动数据 ====================
@@ -169,7 +191,6 @@ def load_exercise_data():
 df_food = load_food_data()
 df_exercise = load_exercise_data()
 
-# 单位配置
 UNIT_CONFIG = {
     'g': {'label': '克', 'default': 100, 'step': 50, 'min': 10, 'max': 1000},
     'ml': {'label': '毫升', 'default': 250, 'step': 50, 'min': 50, 'max': 1000},
@@ -214,11 +235,8 @@ if not st.session_state.user_id:
     st.markdown("### 🔐 登录/注册")
     st.info("💡 输入邮箱即可自动登录/注册，数据将云端保存")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        email = st.text_input("邮箱地址", key="login_email")
-    with col2:
-        username = st.text_input("用户名（可选）", key="login_username", placeholder="留空使用邮箱前缀")
+    email = st.text_input("邮箱地址", key="login_email")
+    username = st.text_input("用户名（可选）", key="login_username", placeholder="留空使用邮箱前缀")
     
     if st.button("登录 / 注册", type="primary", use_container_width=True):
         if email:
@@ -238,7 +256,6 @@ if not st.session_state.user_id:
 # ==================== 主界面 ====================
 st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
 
-# 用户信息栏
 col1, col2, col3 = st.columns([2, 1, 1])
 with col1:
     st.caption(f"👤 {st.session_state.get('user_email', '用户')}")
@@ -250,19 +267,14 @@ with col3:
         st.session_state.user_id = None
         st.rerun()
 
-# 获取今日数据
 today = get_current_date()
 foods = get_food_records(st.session_state.user_id, today)
 exercises = get_exercise_records(st.session_state.user_id, today)
 
 total_calories = sum(f.get('calories', 0) for f in foods)
 total_burned = sum(e.get('calories', 0) for e in exercises)
+user_weight = get_user_weight(st.session_state.user_id)
 
-# 获取用户体重
-user_result = supabase.table("user_profiles").select("weight").eq("id", st.session_state.user_id).execute()
-user_weight = user_result.data[0].get('weight', 70) if user_result.data else 70
-
-# 显示统计卡片
 col_a, col_b, col_c = st.columns(3)
 col_a.metric("🍽️ 今日摄入", f"{total_calories:.0f} kcal")
 col_b.metric("🏋️ 今日消耗", f"{total_burned:.0f} kcal")
@@ -270,20 +282,16 @@ col_c.metric("📊 净摄入", f"{total_calories - total_burned:.0f} kcal")
 
 st.markdown("---")
 
-# ==================== 三列布局 ====================
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧：个人信息 ====================
 with col_left:
     st.markdown("### 👤 个人信息")
-    
     new_weight = st.number_input("体重(kg)", 30, 200, user_weight)
     if st.button("💾 保存", use_container_width=True):
-        supabase.table("user_profiles").update({"weight": new_weight}).eq("id", st.session_state.user_id).execute()
+        update_user_weight(st.session_state.user_id, new_weight)
         st.success("✅ 已保存")
         st.rerun()
 
-# ==================== 中间：食物摄入 ====================
 with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动", "📸 拍照"], horizontal=True)
@@ -338,7 +346,6 @@ with col_mid:
                                     st.success(f"✅ 已添加 {name}")
                                     st.rerun()
     
-    # 显示今日饮食
     st.markdown("---")
     st.markdown("### 📋 今日饮食")
     if foods:
@@ -353,7 +360,6 @@ with col_mid:
     else:
         st.info("暂无记录")
 
-# ==================== 右侧：运动消耗 ====================
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     
@@ -385,7 +391,6 @@ with col_right:
     else:
         st.info("暂无记录")
 
-# ==================== 历史趋势弹窗 ====================
 if st.session_state.get('show_trend', False):
     st.markdown("---")
     st.markdown("## 📈 历史热量趋势")
