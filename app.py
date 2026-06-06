@@ -74,21 +74,24 @@ def create_user(email, password, username=None):
     except Exception as e:
         return None, f"注册失败: {e}"
 
-def verify_email(email, code):
+def verify_and_login(email, code):
+    """验证邮箱并自动登录"""
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if not result.data:
-        return False, "用户不存在"
+        return None, False, "用户不存在"
     
     user = result.data[0]
     if user.get('verification_code') == code:
         expires = datetime.fromisoformat(user.get('verification_code_expires')) if user.get('verification_code_expires') else datetime.now() - timedelta(minutes=1)
         if datetime.now() < expires:
             supabase.table("user_profiles").update({"email_verified": True, "verification_code": None}).eq("email", email).execute()
-            return True, "邮箱验证成功"
+            # 获取最新用户信息并登录
+            updated_user = supabase.table("user_profiles").select("*").eq("email", email).execute()
+            return updated_user.data[0], True, "验证成功，正在登录..."
         else:
-            return False, "验证码已过期"
+            return None, False, "验证码已过期"
     else:
-        return False, "验证码错误"
+        return None, False, "验证码错误"
 
 def login_user(email, password):
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
@@ -109,7 +112,6 @@ def request_password_reset(email):
     if not result.data:
         return False, "邮箱不存在"
     
-    user = result.data[0]
     token = generate_token()
     expires_at = (datetime.now() + timedelta(minutes=30)).isoformat()
     
@@ -142,6 +144,7 @@ def reset_password(token, email, new_password):
     
     return True, "密码重置成功"
 
+# ==================== 其他函数（保持不变）====================
 def get_user_profile(user_id):
     try:
         result = supabase.table("user_profiles").select("*").eq("id", user_id).execute()
@@ -158,7 +161,6 @@ def update_user_profile(user_id, profile):
     except:
         return False
 
-# ==================== 数据操作函数 ====================
 def save_food_record(user_id, date_str, meal, food_name, quantity, calories, protein):
     if not user_id:
         return False
@@ -352,7 +354,6 @@ def show_auth_modal():
         login_email = st.text_input("邮箱", key="login_email")
         login_password = st.text_input("密码", type="password", key="login_password")
         
-        # 登录按钮
         if st.button("登录", type="primary", use_container_width=True, key="login_btn"):
             if login_email and login_password:
                 user, msg = login_user(login_email, login_password)
@@ -382,7 +383,6 @@ def show_auth_modal():
             else:
                 st.warning("请输入邮箱和密码")
         
-        # 忘记密码链接
         st.markdown("---")
         if st.button("🔑 忘记密码？", use_container_width=True, key="forgot_btn"):
             st.session_state.show_reset = True
@@ -419,9 +419,28 @@ def show_auth_modal():
             elif not reg_code:
                 st.warning("请输入验证码")
             else:
-                success, msg = verify_email(reg_email, reg_code)
-                if success:
-                    st.success("✅ 注册成功！请登录")
+                # 验证并自动登录
+                user, success, msg = verify_and_login(reg_email, reg_code)
+                if success and user:
+                    st.session_state.user_id = user['id']
+                    st.session_state.user_email = reg_email
+                    profile = user
+                    st.session_state.user_profile = {
+                        'weight': profile.get('weight', 70),
+                        'height': profile.get('height', 170),
+                        'gender': profile.get('gender', '男'),
+                        'age': profile.get('age', 25),
+                        'activity_level': profile.get('activity_level', '中等'),
+                        'goal': profile.get('goal', '减脂')
+                    }
+                    today = get_current_date()
+                    st.session_state.food_records = get_food_records(user['id'], today)
+                    st.session_state.exercise_records = get_exercise_records(user['id'], today)
+                    st.session_state.total_calories = sum(f.get('calories', 0) for f in st.session_state.food_records)
+                    st.session_state.total_burned = sum(e.get('calories', 0) for e in st.session_state.exercise_records)
+                    st.session_state.show_auth = False
+                    st.success("✅ 注册成功！已自动登录")
+                    st.rerun()
                 else:
                     st.error(msg)
     
@@ -544,7 +563,7 @@ if st.session_state.get('show_reset', False):
     show_reset_modal()
     st.stop()
 
-# ==================== 主界面（保持原有功能）====================
+# ==================== 主界面（简化，保持原有功能）====================
 today = get_current_date()
 foods = st.session_state.food_records
 exercises = st.session_state.exercise_records
@@ -561,12 +580,12 @@ user_activity = user_profile.get('activity_level', '中等')
 user_goal = user_profile.get('goal', '减脂')
 
 daily_target = int(get_daily_target(user_weight, user_height, user_age, user_gender, user_activity, user_goal))
-remaining = daily_target - (total_calories - total_burned)
 
 col_a, col_b, col_c, col_d = st.columns(4)
 col_a.metric("🎯 每日目标", f"{daily_target} kcal")
 col_b.metric("🍽️ 今日摄入", f"{total_calories:.0f} kcal")
 col_c.metric("🏋️ 今日消耗", f"{total_burned:.0f} kcal")
+remaining = daily_target - (total_calories - total_burned)
 if remaining > 0:
     col_d.metric("📊 剩余", f"{remaining:.0f} kcal")
 else:
@@ -576,7 +595,7 @@ st.markdown("---")
 
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧 ====================
+# 左侧：个人信息
 with col_left:
     st.markdown("### 👤 个人信息")
     
@@ -624,7 +643,7 @@ with col_left:
                     delete_exercise_record(e['id'])
         st.rerun()
 
-# ==================== 中间：食物摄入 ====================
+# 中间：食物摄入
 with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动搜索", "📸 拍照识别"], horizontal=True)
@@ -634,8 +653,6 @@ with col_mid:
         term = st.text_input("🔍 搜索食物", placeholder="鸡胸肉、鸡蛋、米饭...")
         if term:
             results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
-            if len(results) == 0:
-                st.warning(f"未找到 '{term}'")
             for idx, row in results.iterrows():
                 unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
                 config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
@@ -716,7 +733,7 @@ with col_mid:
     else:
         st.info("暂无记录")
 
-# ==================== 右侧：运动消耗 ====================
+# 右侧：运动消耗
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 选择器材", "✏️ 自定义运动", "📸 拍照识别"], horizontal=True)
