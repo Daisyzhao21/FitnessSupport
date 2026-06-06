@@ -27,3 +27,5 @@ Thumbs.db
 # Temp files
 /tmp/
 *.tmp
+.streamlit/secrets.toml
+.streamlit/secrets.toml.*
