@@ -423,6 +423,7 @@ def show_auth_modal():
                 user, success, msg = verify_and_login(reg_email, reg_code)
                 if success and user:
                     st.query_params.clear()
+                    st.query_params.clear()
                     st.session_state.user_id = user['id']
                     st.session_state.user_email = reg_email
                     profile = user
