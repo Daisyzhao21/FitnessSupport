@@ -18,6 +18,8 @@ if 'user_id' not in st.session_state:
     st.session_state.user_id = None
 if 'username' not in st.session_state:
     st.session_state.username = None
+if 'show_trend' not in st.session_state:
+    st.session_state.show_trend = False
 
 # 加载数据
 @st.cache_data
@@ -160,11 +162,15 @@ with col_left:
         st.session_state.total_burned = 0.0
         st.rerun()
     
-    # 历史趋势和导出
+    # 历史趋势和导出按钮（两列布局）
     st.markdown("---")
-    if st.button("📈 历史趋势", use_container_width=True):
-        st.session_state.show_trend = True
-    show_export_button(st.session_state.user_id)
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("📈 历史趋势", use_container_width=True):
+            st.session_state.show_trend = True
+            st.rerun()
+    with col_btn2:
+        show_export_button(st.session_state.user_id)
 
 # ==================== 中间：食物摄入 ====================
 with col_mid:
