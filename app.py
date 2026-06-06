@@ -278,21 +278,7 @@ if not st.session_state.user_id:
 # ==================== 主界面 ====================
 st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
 
-# 用户信息栏
-col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-with col1:
-    st.caption(f"👤 {st.session_state.get('user_email', '用户')}")
-with col2:
-    if st.button("📈 历史趋势", use_container_width=True):
-        st.session_state.show_trend = True
-with col3:
-    if st.button("📧 发送报告", use_container_width=True):
-        st.session_state.show_email = True
-with col4:
-    if st.button("🚪 退出", use_container_width=True):
-        st.session_state.user_id = None
-        st.rerun()
-
+# 获取今日数据
 today = get_current_date()
 foods = get_food_records(st.session_state.user_id, today)
 exercises = get_exercise_records(st.session_state.user_id, today)
@@ -309,13 +295,13 @@ user_activity = user_profile.get('activity_level', '中等')
 user_goal = user_profile.get('goal', '减脂')
 
 daily_target = int(get_daily_target(user_weight, user_height, user_age, user_gender, user_activity, user_goal))
-net = total_calories - total_burned
-remaining = daily_target - net
 
+# 统计卡片
 col_a, col_b, col_c, col_d = st.columns(4)
 col_a.metric("🎯 每日目标", f"{daily_target} kcal")
 col_b.metric("🍽️ 今日摄入", f"{total_calories:.0f} kcal")
 col_c.metric("🏋️ 今日消耗", f"{total_burned:.0f} kcal")
+remaining = daily_target - total_calories + total_burned
 if remaining > 0:
     col_d.metric("📊 剩余", f"{remaining:.0f} kcal")
 else:
@@ -323,9 +309,115 @@ else:
 
 st.markdown("---")
 
+# 用户信息栏
+col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+with col1:
+    st.caption(f"👤 {st.session_state.get('user_email', '用户')}")
+with col2:
+    if st.button("📈 历史趋势", use_container_width=True):
+        st.session_state.show_trend = True
+        st.rerun()
+with col3:
+    if st.button("📧 发送报告", use_container_width=True):
+        st.session_state.show_email = True
+        st.rerun()
+with col4:
+    if st.button("🚪 退出", use_container_width=True):
+        st.session_state.user_id = None
+        st.rerun()
+
+# ==================== 历史趋势弹窗 ====================
+if st.session_state.show_trend:
+    st.markdown("---")
+    st.markdown("## 📈 历史趋势")
+    food_trend, exercise_trend = get_trend_data(st.session_state.user_id)
+    
+    if food_trend or exercise_trend:
+        dates = set()
+        food_dict = {}
+        exercise_dict = {}
+        for f in food_trend:
+            dates.add(f['record_date'])
+            food_dict[f['record_date']] = food_dict.get(f['record_date'], 0) + f['calories']
+        for e in exercise_trend:
+            dates.add(e['record_date'])
+            exercise_dict[e['record_date']] = exercise_dict.get(e['record_date'], 0) + e['calories']
+        
+        sorted_dates = sorted(dates)
+        food_vals = [food_dict.get(d, 0) for d in sorted_dates]
+        exercise_vals = [exercise_dict.get(d, 0) for d in sorted_dates]
+        net_vals = [food_vals[i] - exercise_vals[i] for i in range(len(sorted_dates))]
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=sorted_dates, y=food_vals, mode='lines+markers', name='摄入'))
+        fig.add_trace(go.Scatter(x=sorted_dates, y=exercise_vals, mode='lines+markers', name='消耗'))
+        fig.add_trace(go.Scatter(x=sorted_dates, y=net_vals, mode='lines+markers', name='净摄入'))
+        fig.update_layout(title="30天热量趋势", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("暂无数据")
+    
+    if st.button("关闭历史趋势"):
+        st.session_state.show_trend = False
+        st.rerun()
+
+# ==================== 邮件发送界面 ====================
+if st.session_state.show_email:
+    st.markdown("---")
+    st.markdown("## 📧 发送每日报告")
+    
+    email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址")
+    
+    # 显示邮件预览
+    with st.expander("📋 报告预览"):
+        st.write(f"📅 日期: {today}")
+        st.write(f"🍽️ 今日摄入: {total_calories:.0f} kcal")
+        st.write(f"🏋️ 今日消耗: {total_burned:.0f} kcal")
+        st.write(f"📊 净摄入: {total_calories - total_burned:.0f} kcal")
+        st.write(f"🎯 目标进度: {min(100, int(total_calories/daily_target*100))}%")
+        if foods:
+            st.write("**饮食记录:**")
+            for f in foods:
+                st.write(f"  - {f['meal']}: {f['food_name']} ({f['quantity']}g) - {f['calories']:.0f}kcal")
+        if exercises:
+            st.write("**运动记录:**")
+            for e in exercises:
+                st.write(f"  - {e['exercise_name']}: {e['duration']}分钟 - {e['calories']:.0f}kcal")
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("📧 发送报告", type="primary", use_container_width=True):
+            if email_address:
+                with st.spinner("正在发送..."):
+                    success, msg = send_daily_report_email(
+                        email_address,
+                        st.session_state.user_email,
+                        foods,
+                        exercises,
+                        total_calories,
+                        total_burned,
+                        daily_target
+                    )
+                    if success:
+                        st.success(f"✅ {msg}")
+                    else:
+                        st.error(f"❌ {msg}")
+            else:
+                st.warning("请输入邮箱地址")
+    
+    with col_btn2:
+        if st.button("关闭", use_container_width=True):
+            st.session_state.show_email = False
+            st.rerun()
+    
+    if not is_sendgrid_configured():
+        st.info("💡 邮件服务配置中，请在 Secrets 中添加 SENDGRID_API_KEY 和 SENDGRID_FROM_EMAIL")
+
+# ==================== 原有功能（简化版保持稳定）====================
+# 三列布局
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧：个人信息 ====================
+# 左侧：个人信息
 with col_left:
     st.markdown("### 👤 个人信息")
     with st.expander("📝 编辑", expanded=False):
@@ -353,7 +445,7 @@ with col_left:
             delete_exercise_record(e['id'])
         st.rerun()
 
-# ==================== 中间：食物摄入 ====================
+# 中间：食物摄入
 with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动搜索", "📸 拍照识别"], horizontal=True)
@@ -430,7 +522,7 @@ with col_mid:
     else:
         st.info("暂无记录")
 
-# ==================== 右侧：运动消耗 ====================
+# 右侧：运动消耗
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 选择器材", "✏️ 自定义运动", "📸 拍照识别"], horizontal=True)
@@ -537,76 +629,5 @@ with col_right:
     else:
         st.info("暂无运动记录")
 
-# ==================== 历史趋势弹窗 ====================
-if st.session_state.show_trend:
-    st.markdown("---")
-    st.markdown("## 📈 历史趋势")
-    food_trend, exercise_trend = get_trend_data(st.session_state.user_id)
-    
-    if food_trend or exercise_trend:
-        dates = set()
-        food_dict = {}
-        exercise_dict = {}
-        for f in food_trend:
-            dates.add(f['record_date'])
-            food_dict[f['record_date']] = food_dict.get(f['record_date'], 0) + f['calories']
-        for e in exercise_trend:
-            dates.add(e['record_date'])
-            exercise_dict[e['record_date']] = exercise_dict.get(e['record_date'], 0) + e['calories']
-        
-        sorted_dates = sorted(dates)
-        food_vals = [food_dict.get(d, 0) for d in sorted_dates]
-        exercise_vals = [exercise_dict.get(d, 0) for d in sorted_dates]
-        net_vals = [food_vals[i] - exercise_vals[i] for i in range(len(sorted_dates))]
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=sorted_dates, y=food_vals, mode='lines+markers', name='摄入'))
-        fig.add_trace(go.Scatter(x=sorted_dates, y=exercise_vals, mode='lines+markers', name='消耗'))
-        fig.add_trace(go.Scatter(x=sorted_dates, y=net_vals, mode='lines+markers', name='净摄入'))
-        fig.update_layout(title="30天热量趋势", height=450)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("暂无数据")
-    
-    if st.button("关闭历史趋势"):
-        st.session_state.show_trend = False
-        st.rerun()
-
-# ==================== 邮件发送弹窗 ====================
-if st.session_state.show_email:
-    st.markdown("---")
-    st.markdown("## 📧 发送每日报告")
-    
-    email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址")
-    
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("📧 发送报告", type="primary", use_container_width=True):
-            if email_address:
-                with st.spinner("正在发送..."):
-                    success, msg = send_daily_report_email(
-                        email_address,
-                        st.session_state.user_email,
-                        foods,
-                        exercises,
-                        total_calories,
-                        total_burned,
-                        daily_target
-                    )
-                    if success:
-                        st.success(f"✅ {msg}")
-                    else:
-                        st.error(f"❌ {msg}")
-            else:
-                st.warning("请输入邮箱地址")
-    
-    with col_btn2:
-        if st.button("关闭", use_container_width=True):
-            st.session_state.show_email = False
-            st.rerun()
-    
-    if not is_sendgrid_configured():
-        st.info("💡 邮件服务配置中，请在 Secrets 中添加 SENDGRID_API_KEY 和 SENDGRID_FROM_EMAIL")
-
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存 | 📧 邮件报告</p>", unsafe_allow_html=True)
