@@ -10,7 +10,7 @@ from image_recognition import FoodImageRecognizer
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
 # 版本号
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 if 'app_version' not in st.session_state or st.session_state.app_version != APP_VERSION:
     st.session_state.clear()
     st.session_state.app_version = APP_VERSION
@@ -32,6 +32,57 @@ def load_exercise_data():
 df_food = load_food_data()
 df_exercise = load_exercise_data()
 
+# 智能搜索函数 - 支持关键词联想
+def smart_search(df, query):
+    """智能搜索食物，支持关键词联想"""
+    if not query or len(query.strip()) < 1:
+        return df.head(0)
+    
+    query = query.strip().lower()
+    
+    # 关键词映射（同义词/类别联想）
+    keyword_map = {
+        '鸡肉': ['鸡胸肉', '鸡腿肉', '鸡翅', '鸡爪', '烤鸡', '炸鸡'],
+        '牛肉': ['牛肉', '牛腱子', '牛腩', '牛里脊', '肥牛', '卤牛肉', '酱牛肉', '牛排'],
+        '猪肉': ['猪肉', '里脊肉', '五花肉', '排骨', '叉烧', '火腿'],
+        '排骨': ['排骨', '小排', '大排', '糖醋排骨', '红烧排骨'],
+        '里脊': ['里脊肉', '牛里脊'],
+        '鱼': ['三文鱼', '鳕鱼', '鲈鱼', '带鱼', '龙利鱼'],
+        '虾': ['虾', '基围虾', '龙虾'],
+        '蛋': ['鸡蛋', '鸭蛋', '鹌鹑蛋', '皮蛋', '茶叶蛋'],
+        '奶': ['牛奶', '酸奶', '奶酪'],
+        '豆腐': ['豆腐', '嫩豆腐', '老豆腐', '豆腐干'],
+        '蔬菜': ['西兰花', '菠菜', '生菜', '黄瓜', '西红柿', '胡萝卜', '蘑菇', '香菇'],
+        '水果': ['苹果', '香蕉', '橙子', '草莓', '蓝莓', '猕猴桃', '西瓜', '葡萄', '芒果', '火龙果'],
+        '主食': ['米饭', '面条', '馒头', '包子', '面包', '燕麦'],
+        '饮料': ['水', '咖啡', '茶', '奶茶', '可乐', '果汁'],
+        '酒': ['啤酒', '红酒', '白酒', '威士忌', '鸡尾酒'],
+    }
+    
+    # 1. 直接匹配名称
+    direct_match = df[df['名称'].str.contains(query, na=False, case=False)]
+    if len(direct_match) > 0:
+        return direct_match.head(10)
+    
+    # 2. 检查关键词映射
+    for keyword, suggestions in keyword_map.items():
+        if query in keyword or keyword in query:
+            matched = df[df['名称'].isin(suggestions)]
+            if len(matched) > 0:
+                return matched.head(10)
+    
+    # 3. 类别匹配
+    category_match = df[df['类别'].str.contains(query, na=False, case=False)]
+    if len(category_match) > 0:
+        return category_match.head(10)
+    
+    # 4. 部分匹配（名称中包含查询词的任何部分）
+    partial_match = df[df['名称'].str.contains('|'.join(list(query)), na=False, case=False)]
+    if len(partial_match) > 0:
+        return partial_match.head(10)
+    
+    return df.head(0)
+
 # 单位配置
 UNIT_CONFIG = {
     'g': {'label': '克', 'default': 100, 'step': 50, 'min': 10, 'max': 1000},
@@ -39,6 +90,8 @@ UNIT_CONFIG = {
     '个': {'label': '个', 'default': 1, 'step': 1, 'min': 1, 'max': 10},
     '碗': {'label': '碗', 'default': 1, 'step': 1, 'min': 1, 'max': 3},
     '杯': {'label': '杯', 'default': 1, 'step': 1, 'min': 1, 'max': 5},
+    '根': {'label': '根', 'default': 1, 'step': 1, 'min': 1, 'max': 5},
+    '片': {'label': '片', 'default': 2, 'step': 1, 'min': 1, 'max': 10},
 }
 
 def get_recognizer():
@@ -156,48 +209,54 @@ with col_mid:
     st.caption(f"📅 {get_current_date()}")
     
     if mode == "🔍 手动":
-        term = st.text_input("🔍 搜索食物", placeholder="鸡腿肉、卤牛肉、鸡胸肉、西兰花...")
+        term = st.text_input("🔍 搜索食物", placeholder="输入：鸡肉、牛肉、鸡蛋、苹果...")
         if term:
-            results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
+            # 使用智能搜索
+            results = smart_search(df_food, term)
+            
             if len(results) == 0:
-                st.warning(f"未找到 '{term}'，试试：鸡腿肉、卤牛肉、鸡胸肉")
-            for _, row in results.iterrows():
-                unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
-                config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
-                std_qty = row.get('标准量', 100) if pd.notna(row.get('标准量')) else 100
-                
-                cols = st.columns([2, 0.8, 1.2, 0.8])
-                cols[0].markdown(f"**{row['名称']}**")
-                cols[0].caption(row['类别'])
-                cols[1].write(f"{row['热量']:.0f}")
-                
-                qty = cols[2].number_input(
-                    config['label'], 
-                    config['min'], config['max'], config['default'], config['step'],
-                    key=f"qty_{row['名称']}",
-                    label_visibility="collapsed"
-                )
-                
-                multiplier = qty / std_qty
-                cal = row['热量'] * multiplier
-                pro = row['蛋白质'] * multiplier
-                cols[3].write(f"{cal:.0f}")
-                
-                if cols[3].button("➕", key=f"add_{row['名称']}"):
-                    st.session_state.food_records.append({
-                        '日期': get_current_date(),
-                        '餐次': meal,
-                        '名称': row['名称'],
-                        '数量': qty,
-                        '单位': unit,
-                        '热量': cal,
-                        '蛋白质': pro
-                    })
-                    st.session_state.total_calories += cal
-                    st.session_state.total_protein += pro
-                    st.success(f"✅ 已添加 {row['名称']}")
-                    st.rerun()
-                st.divider()
+                st.warning(f"未找到 '{term}'，试试：鸡肉、牛肉、鸡蛋、苹果")
+                # 显示建议
+                st.info("💡 试试搜索：鸡肉、牛肉、猪肉、鱼、虾、蛋、奶、水果")
+            else:
+                st.markdown(f"**找到 {len(results)} 种食物：**")
+                for _, row in results.iterrows():
+                    unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
+                    config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
+                    std_qty = row.get('标准量', 100) if pd.notna(row.get('标准量')) else 100
+                    
+                    cols = st.columns([2, 0.8, 1.2, 0.8])
+                    cols[0].markdown(f"**{row['名称']}**")
+                    cols[0].caption(row['类别'])
+                    cols[1].write(f"{row['热量']:.0f}")
+                    
+                    qty = cols[2].number_input(
+                        config['label'], 
+                        config['min'], config['max'], config['default'], config['step'],
+                        key=f"qty_{row['名称']}_{uuid.uuid4().hex[:4]}",
+                        label_visibility="collapsed"
+                    )
+                    
+                    multiplier = qty / std_qty
+                    cal = row['热量'] * multiplier
+                    pro = row['蛋白质'] * multiplier
+                    cols[3].write(f"{cal:.0f}")
+                    
+                    if cols[3].button("➕", key=f"add_{row['名称']}_{uuid.uuid4().hex[:4]}"):
+                        st.session_state.food_records.append({
+                            '日期': get_current_date(),
+                            '餐次': meal,
+                            '名称': row['名称'],
+                            '数量': qty,
+                            '单位': unit,
+                            '热量': cal,
+                            '蛋白质': pro
+                        })
+                        st.session_state.total_calories += cal
+                        st.session_state.total_protein += pro
+                        st.success(f"✅ 已添加 {row['名称']}")
+                        st.rerun()
+                    st.divider()
     
     else:
         recognizer = get_recognizer()
@@ -338,4 +397,4 @@ with col_right:
         st.info("暂无运动记录")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 📅 记录日期</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 智能搜索 | ✏️ 自定义 | 📸 拍照识别 | 📅 记录日期</p>", unsafe_allow_html=True)
