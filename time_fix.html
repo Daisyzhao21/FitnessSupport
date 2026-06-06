@@ -1,0 +1,26 @@
+<script>
+// 获取用户本地时间并设置到隐藏字段
+function setLocalTime() {
+    const now = new Date();
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const localTime = hours + ':' + minutes;
+    
+    // 存储到 localStorage
+    localStorage.setItem('userTime', localTime);
+    localStorage.setItem('userTimezone', now.getTimezoneOffset());
+    
+    // 创建隐藏输入框
+    let input = document.getElementById('user_local_time');
+    if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.id = 'user_local_time';
+        document.body.appendChild(input);
+    }
+    input.value = localTime;
+    
+    return localTime;
+}
+setLocalTime();
+</script>
