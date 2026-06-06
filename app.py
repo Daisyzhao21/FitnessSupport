@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from PIL import Image
 import uuid
 import plotly.graph_objects as go
@@ -10,6 +10,7 @@ import hashlib
 
 from image_recognition import FoodImageRecognizer
 from email_service import send_daily_report_email, is_sendgrid_configured
+from email_verification import send_verification_email, send_reset_email, generate_code, generate_token
 
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
@@ -38,7 +39,6 @@ def hash_password(password):
 
 # ==================== 用户管理 ====================
 def create_user(email, password, username=None):
-    """创建新用户"""
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if result.data:
         return None, "邮箱已存在"
@@ -48,11 +48,17 @@ def create_user(email, password, username=None):
     if username_check.data:
         final_username = f"{final_username}_{uuid.uuid4().hex[:4]}"
     
+    verification_code = generate_code()
+    expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
+    
     new_user = {
         "id": str(uuid.uuid4()),
         "email": email,
         "username": final_username,
         "password": hash_password(password),
+        "email_verified": False,
+        "verification_code": verification_code,
+        "verification_code_expires": expires_at,
         "weight": 70.0,
         "height": 170.0,
         "gender": "男",
@@ -63,21 +69,78 @@ def create_user(email, password, username=None):
     }
     try:
         insert_result = supabase.table("user_profiles").insert(new_user).execute()
-        return insert_result.data[0], "注册成功"
+        send_verification_email(email, verification_code)
+        return insert_result.data[0], "注册成功，验证码已发送到邮箱"
     except Exception as e:
         return None, f"注册失败: {e}"
 
+def verify_email(email, code):
+    result = supabase.table("user_profiles").select("*").eq("email", email).execute()
+    if not result.data:
+        return False, "用户不存在"
+    
+    user = result.data[0]
+    if user.get('verification_code') == code:
+        expires = datetime.fromisoformat(user.get('verification_code_expires')) if user.get('verification_code_expires') else datetime.now() - timedelta(minutes=1)
+        if datetime.now() < expires:
+            supabase.table("user_profiles").update({"email_verified": True, "verification_code": None}).eq("email", email).execute()
+            return True, "邮箱验证成功"
+        else:
+            return False, "验证码已过期"
+    else:
+        return False, "验证码错误"
+
 def login_user(email, password):
-    """用户登录"""
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if not result.data:
         return None, "邮箱不存在"
     
     user = result.data[0]
+    if not user.get('email_verified'):
+        return None, "邮箱未验证，请查收验证邮件"
+    
     if user.get('password') == hash_password(password):
         return user, "登录成功"
     else:
         return None, "密码错误"
+
+def request_password_reset(email):
+    result = supabase.table("user_profiles").select("*").eq("email", email).execute()
+    if not result.data:
+        return False, "邮箱不存在"
+    
+    user = result.data[0]
+    token = generate_token()
+    expires_at = (datetime.now() + timedelta(minutes=30)).isoformat()
+    
+    supabase.table("user_profiles").update({
+        "reset_token": token,
+        "reset_token_expires": expires_at
+    }).eq("email", email).execute()
+    
+    app_url = os.environ.get("APP_URL", "https://fitnessupport-xxxx.streamlit.app")
+    reset_link = f"{app_url}?reset_token={token}&email={email}"
+    
+    send_reset_email(email, reset_link)
+    return True, "密码重置邮件已发送"
+
+def reset_password(token, email, new_password):
+    result = supabase.table("user_profiles").select("*").eq("email", email).eq("reset_token", token).execute()
+    if not result.data:
+        return False, "无效的重置链接"
+    
+    user = result.data[0]
+    expires = datetime.fromisoformat(user.get('reset_token_expires')) if user.get('reset_token_expires') else datetime.now() - timedelta(minutes=1)
+    if datetime.now() > expires:
+        return False, "重置链接已过期"
+    
+    supabase.table("user_profiles").update({
+        "password": hash_password(new_password),
+        "reset_token": None,
+        "reset_token_expires": None
+    }).eq("email", email).execute()
+    
+    return True, "密码重置成功"
 
 def get_user_profile(user_id):
     try:
@@ -257,6 +320,8 @@ if 'show_email' not in st.session_state:
     st.session_state.show_email = False
 if 'show_auth' not in st.session_state:
     st.session_state.show_auth = False
+if 'show_reset' not in st.session_state:
+    st.session_state.show_reset = False
 
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = {
@@ -286,6 +351,8 @@ def show_auth_modal():
     with tab1:
         login_email = st.text_input("邮箱", key="login_email")
         login_password = st.text_input("密码", type="password", key="login_password")
+        
+        # 登录按钮
         if st.button("登录", type="primary", use_container_width=True, key="login_btn"):
             if login_email and login_password:
                 user, msg = login_user(login_email, login_password)
@@ -314,12 +381,34 @@ def show_auth_modal():
                     st.error(msg)
             else:
                 st.warning("请输入邮箱和密码")
+        
+        # 忘记密码链接
+        st.markdown("---")
+        if st.button("🔑 忘记密码？", use_container_width=True, key="forgot_btn"):
+            st.session_state.show_reset = True
+            st.rerun()
     
     with tab2:
         reg_email = st.text_input("邮箱", key="reg_email")
         reg_password = st.text_input("密码", type="password", key="reg_password")
         reg_confirm = st.text_input("确认密码", type="password", key="reg_confirm")
         reg_username = st.text_input("用户名（可选）", key="reg_username", placeholder="留空使用邮箱前缀")
+        reg_code = st.text_input("验证码", key="reg_code", placeholder="请输入邮箱验证码")
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.caption("验证码将发送到您的邮箱")
+        with col2:
+            if st.button("获取验证码", key="get_code_btn", use_container_width=True):
+                if reg_email:
+                    user, msg = create_user(reg_email, reg_password, reg_username if reg_username else None)
+                    if user:
+                        st.success("验证码已发送，请查收邮件")
+                    else:
+                        st.error(msg)
+                else:
+                    st.warning("请输入邮箱")
+        
         if st.button("注册", type="primary", use_container_width=True, key="register_btn"):
             if not reg_email or not reg_password:
                 st.warning("请填写邮箱和密码")
@@ -327,9 +416,11 @@ def show_auth_modal():
                 st.error("两次输入的密码不一致")
             elif len(reg_password) < 4:
                 st.error("密码至少4位")
+            elif not reg_code:
+                st.warning("请输入验证码")
             else:
-                user, msg = create_user(reg_email, reg_password, reg_username if reg_username else None)
-                if user:
+                success, msg = verify_email(reg_email, reg_code)
+                if success:
                     st.success("✅ 注册成功！请登录")
                 else:
                     st.error(msg)
@@ -337,6 +428,59 @@ def show_auth_modal():
     if st.button("继续试用", use_container_width=True, key="continue_btn"):
         st.session_state.show_auth = False
         st.rerun()
+
+# ==================== 忘记密码弹窗 ====================
+def show_reset_modal():
+    st.markdown("### 🔑 重置密码")
+    st.markdown("请输入您的注册邮箱，我们将发送重置链接到您的邮箱")
+    
+    reset_email = st.text_input("注册邮箱", key="reset_email_input")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("发送重置链接", type="primary", use_container_width=True):
+            if reset_email:
+                success, msg = request_password_reset(reset_email)
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+            else:
+                st.warning("请输入邮箱")
+    
+    with col2:
+        if st.button("返回登录", use_container_width=True):
+            st.session_state.show_reset = False
+            st.rerun()
+    
+    if st.button("关闭", use_container_width=True):
+        st.session_state.show_reset = False
+        st.rerun()
+
+# 处理密码重置链接
+query_params = st.query_params
+if 'reset_token' in query_params and 'email' in query_params:
+    token = query_params['reset_token']
+    email = query_params['email']
+    st.markdown("### 🔐 重置密码")
+    new_password = st.text_input("新密码", type="password")
+    confirm_password = st.text_input("确认新密码", type="password")
+    if st.button("重置密码"):
+        if not new_password:
+            st.warning("请输入新密码")
+        elif new_password != confirm_password:
+            st.error("两次输入的密码不一致")
+        elif len(new_password) < 4:
+            st.error("密码至少4位")
+        else:
+            success, msg = reset_password(token, email, new_password)
+            if success:
+                st.success(msg + "，请登录")
+                st.session_state.show_auth = True
+                st.rerun()
+            else:
+                st.error(msg)
+    st.stop()
 
 # ==================== UI ====================
 st.markdown("""
@@ -395,7 +539,12 @@ if st.session_state.get('show_auth', False):
     show_auth_modal()
     st.stop()
 
-# 个人信息编辑（在左侧栏直接显示）
+# 忘记密码弹窗
+if st.session_state.get('show_reset', False):
+    show_reset_modal()
+    st.stop()
+
+# ==================== 主界面（保持原有功能）====================
 today = get_current_date()
 foods = st.session_state.food_records
 exercises = st.session_state.exercise_records
@@ -427,7 +576,7 @@ st.markdown("---")
 
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧：个人信息（可直接编辑）====================
+# ==================== 左侧 ====================
 with col_left:
     st.markdown("### 👤 个人信息")
     
