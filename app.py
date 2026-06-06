@@ -48,7 +48,7 @@ def safe_int(value, default=25):
     except:
         return default
 
-# ==================== 用户管理（登录用户）====================
+# ==================== 用户管理 ====================
 def get_or_create_user(email, username=None):
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if result.data:
@@ -258,7 +258,6 @@ if 'show_auth' not in st.session_state:
 if 'show_profile' not in st.session_state:
     st.session_state.show_profile = False
 
-# 访客模式默认配置
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = {
         'weight': 70,
@@ -269,7 +268,6 @@ if 'user_profile' not in st.session_state:
         'goal': '减脂'
     }
 
-# 访客模式数据
 if 'food_records' not in st.session_state:
     st.session_state.food_records = []
 if 'exercise_records' not in st.session_state:
@@ -288,13 +286,12 @@ def show_auth_modal():
     
     with tab1:
         login_email = st.text_input("邮箱", key="login_email")
-        if st.button("登录", type="primary", use_container_width=True):
+        if st.button("登录", type="primary", use_container_width=True, key="login_btn"):
             if login_email:
                 user = get_or_create_user(login_email)
                 if user:
                     st.session_state.user_id = user['id']
                     st.session_state.user_email = login_email
-                    # 同步个人信息
                     profile = get_user_profile(user['id'])
                     if profile:
                         st.session_state.user_profile = {
@@ -305,7 +302,6 @@ def show_auth_modal():
                             'activity_level': profile.get('activity_level', '中等'),
                             'goal': profile.get('goal', '减脂')
                         }
-                    # 加载历史数据
                     today = get_current_date()
                     st.session_state.food_records = get_food_records(user['id'], today)
                     st.session_state.exercise_records = get_exercise_records(user['id'], today)
@@ -320,7 +316,7 @@ def show_auth_modal():
     with tab2:
         reg_email = st.text_input("邮箱", key="reg_email")
         reg_username = st.text_input("用户名（可选）", key="reg_username", placeholder="留空使用邮箱前缀")
-        if st.button("注册", type="primary", use_container_width=True):
+        if st.button("注册", type="primary", use_container_width=True, key="register_btn"):
             if reg_email:
                 user = get_or_create_user(reg_email, reg_username if reg_username else None)
                 if user:
@@ -330,7 +326,7 @@ def show_auth_modal():
             else:
                 st.warning("请输入邮箱")
     
-    if st.button("继续试用", use_container_width=True):
+    if st.button("继续试用", use_container_width=True, key="continue_btn"):
         st.session_state.show_auth = False
         st.rerun()
 
@@ -351,10 +347,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 头部
 st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
 
-# 用户栏（访客/登录状态）
+# 用户栏
 col1, col2, col3, col4, col5 = st.columns([1.5, 0.8, 0.8, 0.8, 0.8])
 with col1:
     if st.session_state.user_id:
@@ -363,26 +358,26 @@ with col1:
         st.caption("👤 访客模式")
 with col2:
     if st.session_state.user_id:
-        if st.button("📝 资料", use_container_width=True):
+        if st.button("📝 资料", use_container_width=True, key="profile_btn"):
             st.session_state.show_profile = not st.session_state.show_profile
     else:
-        if st.button("🔐 登录", use_container_width=True):
+        if st.button("🔐 登录", use_container_width=True, key="auth_btn"):
             st.session_state.show_auth = True
 with col3:
     if st.session_state.user_id:
-        if st.button("📈 趋势", use_container_width=True):
+        if st.button("📈 趋势", use_container_width=True, key="trend_btn"):
             st.session_state.show_trend = True
     else:
-        st.button("📈 趋势", disabled=True, use_container_width=True)
+        st.button("📈 趋势", disabled=True, use_container_width=True, key="trend_disabled")
 with col4:
     if st.session_state.user_id:
-        if st.button("📧 报告", use_container_width=True):
+        if st.button("📧 报告", use_container_width=True, key="email_btn"):
             st.session_state.show_email = True
     else:
-        st.button("📧 报告", disabled=True, use_container_width=True)
+        st.button("📧 报告", disabled=True, use_container_width=True, key="email_disabled")
 with col5:
     if st.session_state.user_id:
-        if st.button("🚪 退出", use_container_width=True):
+        if st.button("🚪 退出", use_container_width=True, key="logout_btn"):
             st.session_state.user_id = None
             st.session_state.user_email = None
             st.rerun()
@@ -392,7 +387,7 @@ if st.session_state.get('show_auth', False):
     show_auth_modal()
     st.stop()
 
-# 个人信息编辑弹窗（登录用户）
+# 个人信息编辑弹窗
 if st.session_state.user_id and st.session_state.get('show_profile', False):
     with st.expander("📝 编辑个人信息", expanded=True):
         col_p1, col_p2 = st.columns(2)
@@ -408,7 +403,7 @@ if st.session_state.user_id and st.session_state.get('show_profile', False):
         new_goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
                                index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
         
-        if st.button("💾 保存个人信息", use_container_width=True):
+        if st.button("💾 保存个人信息", use_container_width=True, key="save_profile"):
             st.session_state.user_profile = {
                 'gender': new_gender, 'age': new_age, 'height': float(new_height),
                 'weight': float(new_weight), 'activity_level': new_activity, 'goal': new_goal
@@ -419,7 +414,7 @@ if st.session_state.user_id and st.session_state.get('show_profile', False):
             st.session_state.show_profile = False
             st.rerun()
         
-        if st.button("关闭", use_container_width=True):
+        if st.button("关闭", use_container_width=True, key="close_profile"):
             st.session_state.show_profile = False
             st.rerun()
 
@@ -442,7 +437,6 @@ user_goal = user_profile.get('goal', '减脂')
 daily_target = int(get_daily_target(user_weight, user_height, user_age, user_gender, user_activity, user_goal))
 remaining = daily_target - (total_calories - total_burned)
 
-# 统计卡片
 col_a, col_b, col_c, col_d = st.columns(4)
 col_a.metric("🎯 每日目标", f"{daily_target} kcal")
 col_b.metric("🍽️ 今日摄入", f"{total_calories:.0f} kcal")
@@ -456,7 +450,7 @@ st.markdown("---")
 
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧：个人信息摘要 ====================
+# ==================== 左侧 ====================
 with col_left:
     st.markdown("### 👤 个人信息")
     st.info(f"📏 {int(user_height)}cm | ⚖️ {int(user_weight)}kg | 🎯 {user_goal}")
@@ -465,16 +459,18 @@ with col_left:
     st.progress(progress)
     st.caption(f"今日进度 {progress*100:.0f}%")
     
-    if st.button("🗑️ 清空今日记录", use_container_width=True):
+    if st.button("🗑️ 清空今日记录", use_container_width=True, key="clear_records"):
         st.session_state.food_records = []
         st.session_state.exercise_records = []
         st.session_state.total_calories = 0
         st.session_state.total_burned = 0
         if st.session_state.user_id:
             for f in foods:
-                delete_food_record(f.get('id'))
+                if 'id' in f:
+                    delete_food_record(f['id'])
             for e in exercises:
-                delete_exercise_record(e.get('id'))
+                if 'id' in e:
+                    delete_exercise_record(e['id'])
         st.rerun()
 
 # ==================== 中间：食物摄入 ====================
@@ -489,7 +485,7 @@ with col_mid:
             results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
             if len(results) == 0:
                 st.warning(f"未找到 '{term}'")
-            for _, row in results.iterrows():
+            for idx, row in results.iterrows():
                 unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
                 config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
                 std_qty = row.get('标准量', 100) if pd.notna(row.get('标准量')) else 100
@@ -499,12 +495,12 @@ with col_mid:
                 cols[0].caption(f"{row['类别']} | {row['热量']} kcal/{unit}")
                 
                 qty = cols[2].number_input(config['label'], config['min'], config['max'], config['default'], config['step'], 
-                                           key=f"qty_{row['名称']}", label_visibility="collapsed")
+                                           key=f"qty_{row['名称']}_{idx}", label_visibility="collapsed")
                 
                 cal = row['热量'] * qty / std_qty
                 cols[3].write(f"{cal:.0f} kcal")
                 
-                if cols[3].button("➕", key=f"add_{row['名称']}"):
+                if cols[3].button("➕", key=f"add_{row['名称']}_{idx}"):
                     st.session_state.food_records.append({
                         'meal': meal, 'food_name': row['名称'], 'quantity': qty,
                         'calories': cal, 'protein': row['蛋白质'] * qty / std_qty
@@ -523,7 +519,7 @@ with col_mid:
             if img:
                 image = Image.open(img)
                 st.image(image, caption="预览", use_container_width=True)
-                if st.button("识别食物"):
+                if st.button("识别食物", key="recognize_food"):
                     with st.spinner("AI识别中..."):
                         temp_path = f"/tmp/food_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                         image.save(temp_path)
@@ -537,7 +533,7 @@ with col_mid:
                                 weight_val = f.get('weight', 150)
                                 cal = f.get('calories', weight_val * 1.5)
                                 pro = f.get('protein', weight_val * 0.15)
-                                if st.button(f"➕ 添加 {name}"):
+                                if st.button(f"➕ 添加 {name}", key=f"vision_add_{name}"):
                                     st.session_state.food_records.append({
                                         'meal': meal, 'food_name': name, 'quantity': weight_val,
                                         'calories': cal, 'protein': pro
@@ -557,10 +553,10 @@ with col_mid:
             meals_foods = [f for f in foods if f.get('meal') == m]
             if meals_foods:
                 st.markdown(f"**{m}**")
-                for f in meals_foods:
+                for i, f in enumerate(meals_foods):
                     col1, col2 = st.columns([3, 1])
                     col1.write(f"  {f['food_name']} | {f['quantity']}g | {f['calories']:.0f}kcal")
-                    if col2.button("🗑️", key=f"del_food_{f.get('id', f['food_name'])}"):
+                    if col2.button("🗑️", key=f"del_food_{m}_{i}_{f['food_name']}"):
                         if 'id' in f and st.session_state.user_id:
                             delete_food_record(f['id'])
                         st.session_state.food_records.remove(f)
@@ -598,7 +594,7 @@ with col_right:
         cal = ex['消耗系数'] * (user_weight + extra) * dur
         st.info(f"🔥 预计消耗: **{cal:.0f} kcal**")
         
-        if st.button("✅ 记录运动", type="primary", use_container_width=True):
+        if st.button("✅ 记录运动", type="primary", use_container_width=True, key="record_exercise"):
             st.session_state.exercise_records.append({
                 'exercise_name': ex_name, 'duration': dur, 'extra_weight': extra, 'calories': cal
             })
@@ -621,7 +617,7 @@ with col_right:
         if custom_name:
             cal = custom_coeff * (user_weight + extra) * dur
             st.info(f"🔥 {custom_name} 预计消耗: **{cal:.0f} kcal**")
-            if st.button("✅ 记录自定义运动", type="primary", use_container_width=True):
+            if st.button("✅ 记录自定义运动", type="primary", use_container_width=True, key="record_custom"):
                 st.session_state.exercise_records.append({
                     'exercise_name': custom_name, 'duration': dur, 'extra_weight': extra, 'calories': cal
                 })
@@ -646,7 +642,7 @@ with col_right:
             if img:
                 image = Image.open(img)
                 st.image(image, caption="预览", use_container_width=True)
-                if st.button("🔍 识别器材"):
+                if st.button("🔍 识别器材", key="recognize_exercise"):
                     with st.spinner("AI识别中..."):
                         temp_path = f"/tmp/ex_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                         image.save(temp_path)
@@ -656,7 +652,7 @@ with col_right:
                             st.error(f"识别失败: {res['error']}")
                         else:
                             detected = res.get("foods", [{}])[0].get('name', '未知器材')
-                            ex_name = st.text_input("器材名称", value=detected)
+                            ex_name = st.text_input("器材名称", value=detected, key="detected_name")
                             col_d1, col_d2 = st.columns(2)
                             with col_d1:
                                 dur = st.number_input("时长(分钟)", 1, 180, 30, 5, key="reco_dur")
@@ -665,7 +661,7 @@ with col_right:
                             
                             cal = 0.08 * (user_weight + extra) * dur
                             st.info(f"🔥 预计消耗: **{cal:.0f} kcal**")
-                            if st.button("✅ 记录", key="reco_add"):
+                            if st.button("✅ 记录", key="reco_record"):
                                 st.session_state.exercise_records.append({
                                     'exercise_name': ex_name, 'duration': dur, 'extra_weight': extra, 'calories': cal
                                 })
@@ -682,10 +678,10 @@ with col_right:
     if exercises:
         total_min = sum(e.get('duration', 0) for e in exercises)
         st.metric("总运动时长", f"{total_min} 分钟")
-        for e in exercises:
+        for i, e in enumerate(exercises):
             col1, col2 = st.columns([3, 1])
             col1.write(f"  {e['exercise_name']} | {e['duration']}分钟 | {e['calories']:.0f}kcal")
-            if col2.button("🗑️", key=f"del_ex_{e.get('id', e['exercise_name'])}"):
+            if col2.button("🗑️", key=f"del_ex_{i}_{e['exercise_name']}"):
                 if 'id' in e and st.session_state.user_id:
                     delete_exercise_record(e['id'])
                 st.session_state.exercise_records.remove(e)
@@ -725,7 +721,7 @@ if st.session_state.get('show_trend', False) and st.session_state.user_id:
     else:
         st.info("暂无数据")
     
-    if st.button("关闭"):
+    if st.button("关闭", key="close_trend"):
         st.session_state.show_trend = False
         st.rerun()
 
@@ -734,7 +730,7 @@ if st.session_state.get('show_email', False) and st.session_state.user_id:
     st.markdown("---")
     st.markdown("## 📧 发送每日报告")
     
-    email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址")
+    email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址", key="report_email")
     
     with st.expander("📋 报告预览"):
         st.write(f"📅 日期: {today}")
@@ -752,7 +748,7 @@ if st.session_state.get('show_email', False) and st.session_state.user_id:
     
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("📧 发送报告", type="primary", use_container_width=True):
+        if st.button("📧 发送报告", type="primary", use_container_width=True, key="send_report"):
             if email_address:
                 with st.spinner("正在发送..."):
                     success, msg = send_daily_report_email(
@@ -772,7 +768,7 @@ if st.session_state.get('show_email', False) and st.session_state.user_id:
                 st.warning("请输入邮箱地址")
     
     with col_btn2:
-        if st.button("关闭", use_container_width=True):
+        if st.button("关闭", use_container_width=True, key="close_email"):
             st.session_state.show_email = False
             st.rerun()
     
