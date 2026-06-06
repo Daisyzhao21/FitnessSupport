@@ -4,25 +4,34 @@ import os
 from datetime import datetime, date
 from PIL import Image
 import uuid
-from supabase import create_client
 import plotly.graph_objects as go
+from supabase import create_client
 
 from image_recognition import FoodImageRecognizer
 
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
 # ==================== Supabase 连接 ====================
-@st.cache_resource
 def init_supabase():
+    """初始化 Supabase 连接（兼容本地和云端）"""
+    # 优先使用 st.secrets（Streamlit Cloud）
     try:
         url = st.secrets["SUPABASE_URL"]
         key = st.secrets["SUPABASE_KEY"]
-    except:
-        import toml
-        with open('.streamlit/secrets.toml', 'r') as f:
-            config = toml.load(f)
-        url = config["SUPABASE_URL"]
-        key = config["SUPABASE_KEY"]
+        print("使用 st.secrets 配置")
+    except Exception as e:
+        # 本地开发：从 .streamlit/secrets.toml 读取
+        try:
+            import toml
+            with open('.streamlit/secrets.toml', 'r') as f:
+                config = toml.load(f)
+            url = config["SUPABASE_URL"]
+            key = config["SUPABASE_KEY"]
+            print("使用本地 secrets.toml 配置")
+        except Exception as e2:
+            st.error("无法加载 Supabase 配置，请检查 secrets")
+            st.stop()
+    
     return create_client(url, key)
 
 supabase = init_supabase()
@@ -147,7 +156,7 @@ def get_trend_data(user_id, days=30):
         print(f"获取趋势失败: {e}")
         return [], []
 
-# ==================== 加载数据 ====================
+# ==================== 加载食物运动数据 ====================
 @st.cache_data
 def load_food_data():
     df = pd.read_csv('food_nutrition.csv', encoding='utf-8-sig')
@@ -213,14 +222,15 @@ if not st.session_state.user_id:
     
     if st.button("登录 / 注册", type="primary", use_container_width=True):
         if email:
-            user = get_or_create_user(email, username if username else None)
-            if user:
-                st.session_state.user_id = user['id']
-                st.session_state.user_email = user['email']
-                st.success(f"✅ 欢迎，{user.get('username', email)}！")
-                st.rerun()
-            else:
-                st.error("登录失败，请重试")
+            with st.spinner("处理中..."):
+                user = get_or_create_user(email, username if username else None)
+                if user:
+                    st.session_state.user_id = user['id']
+                    st.session_state.user_email = user['email']
+                    st.success(f"✅ 欢迎，{user.get('username', email)}！")
+                    st.rerun()
+                else:
+                    st.error("登录失败，请重试")
         else:
             st.warning("请输入邮箱地址")
     st.stop()
@@ -248,6 +258,10 @@ exercises = get_exercise_records(st.session_state.user_id, today)
 total_calories = sum(f.get('calories', 0) for f in foods)
 total_burned = sum(e.get('calories', 0) for e in exercises)
 
+# 获取用户体重
+user_result = supabase.table("user_profiles").select("weight").eq("id", st.session_state.user_id).execute()
+user_weight = user_result.data[0].get('weight', 70) if user_result.data else 70
+
 # 显示统计卡片
 col_a, col_b, col_c = st.columns(3)
 col_a.metric("🍽️ 今日摄入", f"{total_calories:.0f} kcal")
@@ -263,19 +277,11 @@ col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 with col_left:
     st.markdown("### 👤 个人信息")
     
-    # 获取用户资料
-    user_result = supabase.table("user_profiles").select("*").eq("id", st.session_state.user_id).execute()
-    user_data = user_result.data[0] if user_result.data else {}
-    
-    col_w, col_h = st.columns(2)
-    with col_w:
-        weight = st.number_input("体重(kg)", 30, 200, user_data.get('weight', 70))
-    with col_h:
-        height = st.number_input("身高(cm)", 100, 250, user_data.get('height', 170))
-    
-    if st.button("💾 保存个人信息", use_container_width=True):
-        supabase.table("user_profiles").update({"weight": weight, "height": height}).eq("id", st.session_state.user_id).execute()
+    new_weight = st.number_input("体重(kg)", 30, 200, user_weight)
+    if st.button("💾 保存", use_container_width=True):
+        supabase.table("user_profiles").update({"weight": new_weight}).eq("id", st.session_state.user_id).execute()
         st.success("✅ 已保存")
+        st.rerun()
 
 # ==================== 中间：食物摄入 ====================
 with col_mid:
@@ -357,7 +363,7 @@ with col_right:
     
     dur = st.number_input("分钟", 1, 180, 30, 5)
     extra = st.number_input("负重(kg)", 0, 100, 0, 5)
-    cal = ex['消耗系数'] * (weight + extra) * dur
+    cal = ex['消耗系数'] * (user_weight + extra) * dur
     
     st.info(f"🔥 {cal:.0f} kcal")
     if st.button("✅ 记录运动"):
@@ -387,7 +393,6 @@ if st.session_state.get('show_trend', False):
     food_trend, exercise_trend = get_trend_data(st.session_state.user_id)
     
     if food_trend or exercise_trend:
-        # 合并数据
         dates = set()
         food_dict = {}
         exercise_dict = {}
