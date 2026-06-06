@@ -272,13 +272,16 @@ if not st.session_state.user_id:
 # ==================== 主界面 ====================
 st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
 
-col1, col2, col3 = st.columns([2, 1, 1])
+col1, col2, col3, col4 = st.columns([2, 1, 1])
 with col1:
     st.caption(f"👤 {st.session_state.get('user_email', '用户')}")
 with col2:
     if st.button("📈 历史趋势", use_container_width=True):
         st.session_state.show_trend = True
 with col3:
+    if st.button("📧 发送报告", use_container_width=True):
+        st.session_state.show_email = True
+with col4:
     if st.button("🚪 退出", use_container_width=True):
         st.session_state.user_id = None
         st.rerun()
@@ -568,3 +571,46 @@ if st.session_state.get('show_trend', False):
 
 st.markdown("---")
 st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存</p>", unsafe_allow_html=True)
+
+# ==================== 邮件发送功能 ====================
+from email_service import send_daily_report_email, is_sendgrid_configured
+
+# 在用户信息栏旁边添加邮件发送按钮
+# 找到 col1, col2, col3, col4 那段，修改为：
+
+# ==================== 邮件发送弹窗 ====================
+if st.session_state.get('show_email', False):
+    st.markdown("---")
+    st.markdown("## 📧 发送每日报告")
+    
+    email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("发送报告", type="primary", use_container_width=True):
+            if email_address:
+                with st.spinner("正在发送..."):
+                    success, msg = send_daily_report_email(
+                        email_address,
+                        st.session_state.user_email,
+                        foods,
+                        exercises,
+                        total_calories,
+                        total_burned,
+                        daily_target
+                    )
+                    if success:
+                        st.success(f"✅ {msg}")
+                    else:
+                        st.error(f"❌ {msg}")
+            else:
+                st.warning("请输入邮箱地址")
+    
+    with col2:
+        if st.button("关闭", use_container_width=True):
+            st.session_state.show_email = False
+            st.rerun()
+    
+    # 显示配置提示
+    if not is_sendgrid_configured():
+        st.info("💡 邮件服务配置中，请联系管理员配置 SendGrid")
