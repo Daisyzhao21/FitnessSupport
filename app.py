@@ -32,7 +32,6 @@ supabase = init_supabase()
 
 # ==================== 辅助函数 ====================
 def safe_float(value, default=70.0):
-    """安全转换为浮点数"""
     if value is None:
         return default
     try:
@@ -41,13 +40,21 @@ def safe_float(value, default=70.0):
         return default
 
 def safe_int(value, default=25):
-    """安全转换为整数"""
     if value is None:
         return default
     try:
         return int(value)
     except (ValueError, TypeError):
         return default
+
+def safe_value(value, min_val, max_val, default):
+    """确保值在范围内"""
+    val = safe_float(value, default)
+    if val < min_val:
+        return default
+    if val > max_val:
+        return default
+    return val
 
 # ==================== 用户管理 ====================
 def get_or_create_user(email, username=None):
@@ -223,7 +230,6 @@ def get_current_date():
     return date.today().strftime("%Y-%m-%d")
 
 def calculate_bmr(weight, height, age, gender):
-    """计算基础代谢率 - 确保数值类型"""
     w = safe_float(weight, 70)
     h = safe_float(height, 170)
     a = safe_int(age, 25)
@@ -234,7 +240,6 @@ def calculate_bmr(weight, height, age, gender):
         return 655 + (9.6 * w) + (1.8 * h) - (4.7 * a)
 
 def get_daily_target(weight, height, age, gender, activity_level, goal):
-    """计算每日目标热量"""
     bmr = calculate_bmr(weight, height, age, gender)
     activity_factors = {'低': 1.2, '中等': 1.375, '高': 1.55, '非常高': 1.725}
     tdee = bmr * activity_factors.get(activity_level, 1.375)
@@ -316,12 +321,12 @@ exercises = get_exercise_records(st.session_state.user_id, today)
 total_calories = sum(f.get('calories', 0) for f in foods)
 total_burned = sum(e.get('calories', 0) for e in exercises)
 
-# 获取用户资料
+# 获取用户资料 - 确保值在有效范围内
 user_profile = get_user_profile(st.session_state.user_id)
-user_weight = safe_float(user_profile.get('weight', 70))
-user_height = safe_float(user_profile.get('height', 170))
+user_weight = safe_value(user_profile.get('weight'), 30, 200, 70)
+user_height = safe_value(user_profile.get('height'), 100, 250, 170)
 user_gender = user_profile.get('gender', '男')
-user_age = safe_int(user_profile.get('age', 25))
+user_age = safe_int(user_profile.get('age'), 25)
 user_activity = user_profile.get('activity_level', '中等')
 user_goal = user_profile.get('goal', '减脂')
 
