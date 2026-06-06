@@ -30,31 +30,23 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# ==================== 修复后的用户管理 ====================
+# ==================== 用户管理 ====================
 def get_or_create_user(email, username=None):
-    """获取或创建用户 - 处理重复用户名"""
-    # 先按邮箱查询
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
-    
     if result.data:
-        # 用户已存在，直接返回
         return result.data[0]
     
-    # 用户不存在，创建新用户
-    # 处理用户名重复
     final_username = username or email.split('@')[0]
-    
-    # 检查用户名是否已存在
     username_check = supabase.table("user_profiles").select("*").eq("username", final_username).execute()
     if username_check.data:
-        # 用户名已存在，添加随机后缀
         final_username = f"{final_username}_{uuid.uuid4().hex[:4]}"
     
     new_user = {
         "id": str(uuid.uuid4()),
         "email": email,
         "username": final_username,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "weight": 70  # 默认体重
     }
     
     try:
@@ -65,19 +57,26 @@ def get_or_create_user(email, username=None):
         return None
 
 def get_user_weight(user_id):
-    """获取用户体重"""
+    """获取用户体重 - 返回数字"""
     try:
         result = supabase.table("user_profiles").select("weight").eq("id", user_id).execute()
-        if result.data:
-            return result.data[0].get('weight', 70)
+        if result.data and result.data[0].get('weight'):
+            weight = result.data[0]['weight']
+            # 确保返回数字
+            if isinstance(weight, (int, float)):
+                return float(weight)
+            try:
+                return float(weight)
+            except:
+                return 70.0
     except:
         pass
-    return 70
+    return 70.0
 
 def update_user_weight(user_id, weight):
     """更新用户体重"""
     try:
-        supabase.table("user_profiles").update({"weight": weight}).eq("id", user_id).execute()
+        supabase.table("user_profiles").update({"weight": float(weight)}).eq("id", user_id).execute()
         return True
     except:
         return False
@@ -273,6 +272,8 @@ exercises = get_exercise_records(st.session_state.user_id, today)
 
 total_calories = sum(f.get('calories', 0) for f in foods)
 total_burned = sum(e.get('calories', 0) for e in exercises)
+
+# 获取用户体重（确保是数字）
 user_weight = get_user_weight(st.session_state.user_id)
 
 col_a, col_b, col_c = st.columns(3)
@@ -286,7 +287,7 @@ col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
 with col_left:
     st.markdown("### 👤 个人信息")
-    new_weight = st.number_input("体重(kg)", 30, 200, user_weight)
+    new_weight = st.number_input("体重(kg)", 30, 200, int(user_weight))
     if st.button("💾 保存", use_container_width=True):
         update_user_weight(st.session_state.user_id, new_weight)
         st.success("✅ 已保存")
@@ -369,7 +370,7 @@ with col_right:
     
     dur = st.number_input("分钟", 1, 180, 30, 5)
     extra = st.number_input("负重(kg)", 0, 100, 0, 5)
-    cal = ex['消耗系数'] * (user_weight + extra) * dur
+    cal = ex['消耗系数'] * (float(user_weight) + float(extra)) * int(dur)
     
     st.info(f"🔥 {cal:.0f} kcal")
     if st.button("✅ 记录运动"):
