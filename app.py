@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from supabase import create_client
 
 from image_recognition import FoodImageRecognizer
+from email_service import send_daily_report_email, is_sendgrid_configured
 
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
@@ -250,6 +251,9 @@ st.markdown("""
 # 登录
 if 'user_id' not in st.session_state:
     st.session_state.user_id = None
+if 'show_email' not in st.session_state:
+    st.session_state.show_trend = False
+    st.session_state.show_email = False
 
 if not st.session_state.user_id:
     st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
@@ -272,7 +276,8 @@ if not st.session_state.user_id:
 # ==================== 主界面 ====================
 st.markdown('<div class="main-header"><h1>💪 健身营养助手</h1><p>📸 拍照识别 | 🏋️ 运动记录 | 📊 摄入 vs 消耗</p></div>', unsafe_allow_html=True)
 
-col1, col2, col3, col4 = st.columns([2, 1, 1])
+# 用户信息栏 - 4个按钮
+col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
 with col1:
     st.caption(f"👤 {st.session_state.get('user_email', '用户')}")
 with col2:
@@ -423,14 +428,12 @@ with col_mid:
     else:
         st.info("暂无记录")
 
-# ==================== 右侧：运动消耗（完整版）====================
+# ==================== 右侧：运动消耗 ====================
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 选择器材", "✏️ 自定义运动", "📸 拍照识别"], horizontal=True)
     
-    # 方式1：选择器材
     if mode_ex == "🔍 选择器材":
-        # 添加搜索框
         exercise_search = st.text_input("🔍 搜索运动", placeholder="跑步机、深蹲、卧推...")
         if exercise_search:
             filtered = df_exercise[df_exercise['器材'].str.contains(exercise_search, na=False)]
@@ -459,7 +462,6 @@ with col_right:
                 st.success(f"✅ 已记录 {ex_name}")
                 st.rerun()
     
-    # 方式2：自定义运动
     elif mode_ex == "✏️ 自定义运动":
         custom_name = st.text_input("运动名称", placeholder="例如: 俯卧撑、卷腹、波比跳...")
         custom_coeff = st.number_input("消耗系数", 0.01, 0.50, 0.08, 0.01, help="参考: 跑步0.12, 跳绳0.15, 力量0.07")
@@ -478,7 +480,6 @@ with col_right:
                     st.success(f"✅ 已记录 {custom_name}")
                     st.rerun()
     
-    # 方式3：拍照识别器材
     else:
         recognizer = get_recognizer()
         if recognizer:
@@ -534,7 +535,7 @@ with col_right:
     else:
         st.info("暂无运动记录")
 
-# ==================== 历史趋势 ====================
+# ==================== 历史趋势弹窗 ====================
 if st.session_state.get('show_trend', False):
     st.markdown("---")
     st.markdown("## 📈 历史趋势")
@@ -569,15 +570,6 @@ if st.session_state.get('show_trend', False):
         st.session_state.show_trend = False
         st.rerun()
 
-st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存</p>", unsafe_allow_html=True)
-
-# ==================== 邮件发送功能 ====================
-from email_service import send_daily_report_email, is_sendgrid_configured
-
-# 在用户信息栏旁边添加邮件发送按钮
-# 找到 col1, col2, col3, col4 那段，修改为：
-
 # ==================== 邮件发送弹窗 ====================
 if st.session_state.get('show_email', False):
     st.markdown("---")
@@ -585,8 +577,8 @@ if st.session_state.get('show_email', False):
     
     email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址")
     
-    col1, col2 = st.columns(2)
-    with col1:
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
         if st.button("发送报告", type="primary", use_container_width=True):
             if email_address:
                 with st.spinner("正在发送..."):
@@ -606,11 +598,13 @@ if st.session_state.get('show_email', False):
             else:
                 st.warning("请输入邮箱地址")
     
-    with col2:
+    with col_btn2:
         if st.button("关闭", use_container_width=True):
             st.session_state.show_email = False
             st.rerun()
     
-    # 显示配置提示
     if not is_sendgrid_configured():
         st.info("💡 邮件服务配置中，请联系管理员配置 SendGrid")
+
+st.markdown("---")
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存</p>", unsafe_allow_html=True)
