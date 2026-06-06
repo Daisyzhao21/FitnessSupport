@@ -55,6 +55,12 @@ def get_user_local_time():
 # 简化版 - 直接使用 Python 的本地时间（Streamlit Cloud 会用 UTC）
 # 改用浏览器本地时间
 def get_current_time():
+    # 尝试从 localStorage 获取用户时间
+    import streamlit as st
+    user_time = st.query_params.get("local_time", None)
+    if user_time:
+        return user_time
+    return datetime.now().strftime("%H:%M")
     """获取用户本地时间（通过 JavaScript）"""
     return get_user_local_time()
 
