@@ -624,7 +624,7 @@ if st.session_state.user_id and st.session_state.get('show_profile', False):
         use_custom = st.checkbox("使用自定义每日目标", value=st.session_state.user_profile.get('custom_target') is not None)
         if use_custom:
             custom_target = st.number_input("自定义每日热量目标 (kcal)", min_value=1000, max_value=5000, 
-                                            value=int(st.session_state.user_profile.get('custom_target', 2000)), step=50)
+                                            value=int(st.session_state.user_profile.get("custom_target") or 2000), step=50)
         else:
             custom_target = None
         
