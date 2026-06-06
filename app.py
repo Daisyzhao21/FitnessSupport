@@ -9,6 +9,7 @@ from supabase import create_client
 import hashlib
 import random
 import string
+import time
 
 from image_recognition import FoodImageRecognizer
 from email_service import send_daily_report_email, is_sendgrid_configured
@@ -43,9 +44,20 @@ def generate_code(length=6):
 
 # ==================== 用户管理 ====================
 def create_user(email, password, username=None):
-    """创建新用户"""
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if result.data:
+        # 如果邮箱已存在但未验证，重新发送验证码
+        user = result.data[0]
+        if not user.get('email_verified'):
+            new_code = generate_code()
+            expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
+            supabase.table("user_profiles").update({
+                "verification_code": new_code,
+                "verification_code_expires": expires_at,
+                "password": hash_password(password)
+            }).eq("email", email).execute()
+            send_verification_email(email, new_code)
+            return user, "验证码已重新发送，请查收邮件"
         return None, "邮箱已存在"
     
     final_username = username or email.split('@')[0]
@@ -53,7 +65,6 @@ def create_user(email, password, username=None):
     if username_check.data:
         final_username = f"{final_username}_{uuid.uuid4().hex[:4]}"
     
-    # 生成验证码
     verification_code = generate_code()
     expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
     
@@ -75,15 +86,12 @@ def create_user(email, password, username=None):
     }
     try:
         insert_result = supabase.table("user_profiles").insert(new_user).execute()
-        # 发送验证码
-        from email_verification import send_verification_email
         send_verification_email(email, verification_code)
         return insert_result.data[0], "注册成功，验证码已发送到邮箱"
     except Exception as e:
         return None, f"注册失败: {e}"
 
 def verify_email(email, code):
-    """验证邮箱"""
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if not result.data:
         return False, "用户不存在"
@@ -99,15 +107,45 @@ def verify_email(email, code):
     else:
         return False, "验证码错误"
 
+def send_verification_email(to_email, code):
+    """发送验证码邮件"""
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        
+        sendgrid_api_key = st.secrets["SENDGRID_API_KEY"]
+        from_email = st.secrets["SENDGRID_FROM_EMAIL"]
+        
+        subject = "【健身营养助手】邮箱验证码"
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"></head>
+        <body>
+            <h2>💪 健身营养助手</h2>
+            <p>您的验证码是：</p>
+            <h1 style="color: #667eea;">{code}</h1>
+            <p>验证码有效期为10分钟。</p>
+        </body>
+        </html>
+        """
+        
+        message = Mail(from_email=from_email, to_emails=to_email, subject=subject, html_content=html_content)
+        sg = SendGridAPIClient(sendgrid_api_key)
+        sg.send(message)
+        return True
+    except Exception as e:
+        print(f"发送失败: {e}")
+        return False
+
 def login_user(email, password):
-    """用户登录"""
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if not result.data:
         return None, "邮箱不存在"
     
     user = result.data[0]
     if not user.get('email_verified'):
-        return None, "邮箱未验证，请查收验证邮件"
+        return None, "邮箱未验证，请先注册"
     
     if user.get('password') == hash_password(password):
         return user, "登录成功"
@@ -292,6 +330,8 @@ if 'show_email' not in st.session_state:
     st.session_state.show_email = False
 if 'show_auth' not in st.session_state:
     st.session_state.show_auth = False
+if 'code_cooldown' not in st.session_state:
+    st.session_state.code_cooldown = 0
 
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = {
@@ -364,13 +404,22 @@ def show_auth_modal():
         
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.caption("验证码将发送到您的邮箱")
+            # 显示冷却时间
+            cooldown = st.session_state.code_cooldown
+            if cooldown > 0:
+                st.caption(f"⏰ 请等待 {cooldown} 秒后重新获取")
+            else:
+                st.caption("点击获取验证码")
+        
         with col2:
-            if st.button("获取验证码", key="get_code_btn", use_container_width=True):
+            # 获取验证码按钮（带冷却）
+            if st.button("获取验证码", key="get_code_btn", use_container_width=True, disabled=(st.session_state.code_cooldown > 0)):
                 if reg_email:
                     user, msg = create_user(reg_email, reg_password, reg_username if reg_username else None)
                     if user:
+                        st.session_state.code_cooldown = 60
                         st.success("验证码已发送，请查收邮件")
+                        st.rerun()
                     else:
                         st.error(msg)
                 else:
@@ -395,6 +444,13 @@ def show_auth_modal():
     if st.button("继续试用", use_container_width=True, key="continue_btn"):
         st.session_state.show_auth = False
         st.rerun()
+
+# 减少冷却时间的计数器（每次页面刷新减少）
+def update_cooldown():
+    if st.session_state.code_cooldown > 0:
+        st.session_state.code_cooldown -= 1
+
+update_cooldown()
 
 # ==================== UI 主体 ====================
 st.markdown("""
@@ -462,8 +518,6 @@ if st.session_state.user_id and st.session_state.get('show_email', False):
         email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址", key="report_email")
         
         today_data = get_current_date()
-        foods_data = st.session_state.food_records
-        exercises_data = st.session_state.exercise_records
         total_cal = st.session_state.total_calories
         total_burn = st.session_state.total_burned
         user_prof = st.session_state.user_profile
@@ -579,7 +633,7 @@ st.markdown("---")
 
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# ==================== 左侧 ====================
+# 左侧
 with col_left:
     st.markdown("### 👤 个人信息")
     st.info(f"📏 {int(user_height)}cm | ⚖️ {int(user_weight)}kg | 🎯 {user_goal}")
@@ -602,7 +656,7 @@ with col_left:
                     delete_exercise_record(e['id'])
         st.rerun()
 
-# ==================== 中间 ====================
+# 中间：食物摄入
 with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动搜索", "📸 拍照识别"], horizontal=True)
@@ -694,7 +748,7 @@ with col_mid:
     else:
         st.info("暂无记录")
 
-# ==================== 右侧 ====================
+# 右侧：运动消耗
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 选择器材", "✏️ 自定义运动", "📸 拍照识别"], horizontal=True)
