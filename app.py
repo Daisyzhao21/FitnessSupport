@@ -4,23 +4,59 @@ import os
 from datetime import datetime
 from PIL import Image
 import uuid
-import time
+import json
 
 from image_recognition import FoodImageRecognizer
 
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
 # 版本号 - 强制刷新缓存
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 if 'app_version' not in st.session_state or st.session_state.app_version != APP_VERSION:
     st.session_state.clear()
     st.session_state.app_version = APP_VERSION
 
-# 获取本地时间（自动根据系统时区）
+# 使用 JavaScript 获取用户本地时间
+def get_user_local_time():
+    """通过前端 JavaScript 获取用户本地时间"""
+    # 注入 JavaScript 获取本地时间
+    js_code = """
+    <script>
+    function getUserTime() {
+        const now = new Date();
+        const hours = now.getHours().toString().padStart(2, '0');
+        const minutes = now.getMinutes().toString().padStart(2, '0');
+        const timeStr = hours + ':' + minutes;
+        
+        // 存储到 sessionStorage
+        sessionStorage.setItem('user_local_time', timeStr);
+        sessionStorage.setItem('user_timezone_offset', now.getTimezoneOffset());
+        
+        // 通过 URL 参数传递（备用）
+        const url = new URL(window.location.href);
+        url.searchParams.set('local_time', timeStr);
+        window.history.replaceState({}, '', url);
+        
+        return timeStr;
+    }
+    getUserTime();
+    </script>
+    """
+    st.markdown(js_code, unsafe_allow_html=True)
+    
+    # 尝试从 query params 获取时间
+    query_params = st.query_params
+    if 'local_time' in query_params:
+        return query_params['local_time']
+    
+    # 默认返回当前时间（服务器时间）
+    return datetime.now().strftime("%H:%M")
+
+# 简化版 - 直接使用 Python 的本地时间（Streamlit Cloud 会用 UTC）
+# 改用浏览器本地时间
 def get_current_time():
-    """获取当前本地时间"""
-    now = datetime.now()
-    return now.strftime("%H:%M")
+    """获取用户本地时间（通过 JavaScript）"""
+    return get_user_local_time()
 
 # 加载数据
 @st.cache_data
@@ -159,11 +195,11 @@ with col_mid:
     st.caption(f"🕐 {get_current_time()}")
     
     if mode == "🔍 手动":
-        term = st.text_input("🔍 搜索食物", placeholder="鸡腿肉、卤牛肉、白煮肉、西兰花...")
+        term = st.text_input("🔍 搜索食物", placeholder="鸡腿肉、卤牛肉、鸡胸肉、西兰花...")
         if term:
             results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
             if len(results) == 0:
-                st.warning("未找到")
+                st.warning(f"未找到 '{term}'，试试：鸡腿肉、卤牛肉、鸡胸肉")
             for _, row in results.iterrows():
                 unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
                 config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
@@ -205,7 +241,6 @@ with col_mid:
     else:
         recognizer = get_recognizer()
         if recognizer:
-            # 摄像头设置 - 使用后置摄像头
             st.markdown("📸 **提示：移动端默认使用后置摄像头**")
             img = st.camera_input("拍照", key="food_camera")
             if img:
@@ -342,4 +377,4 @@ with col_right:
         st.info("暂无运动记录")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 🕐 自动时间</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | ✏️ 自定义 | 📸 拍照识别 | 🕐 自动使用本地时间</p>", unsafe_allow_html=True)
