@@ -46,7 +46,6 @@ def generate_code(length=6):
 def create_user(email, password, username=None):
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if result.data:
-        # 如果邮箱已存在但未验证，重新发送验证码
         user = result.data[0]
         if not user.get('email_verified'):
             new_code = generate_code()
@@ -82,6 +81,7 @@ def create_user(email, password, username=None):
         "age": 25,
         "activity_level": "中等",
         "goal": "减脂",
+        "daily_target": None,  # 自定义每日目标
         "created_at": datetime.now().isoformat()
     }
     try:
@@ -108,7 +108,6 @@ def verify_email(email, code):
         return False, "验证码错误"
 
 def send_verification_email(to_email, code):
-    """发送验证码邮件"""
     try:
         from sendgrid import SendGridAPIClient
         from sendgrid.helpers.mail import Mail
@@ -280,16 +279,19 @@ def calculate_bmr(weight, height, age, gender):
     else:
         return 655 + (9.6 * w) + (1.8 * h) - (4.7 * a)
 
-def get_daily_target(weight, height, age, gender, activity_level, goal):
+def get_daily_target_from_profile(weight, height, age, gender, activity_level, goal, custom_target=None):
+    """获取每日目标，优先使用自定义目标"""
+    if custom_target and custom_target > 0:
+        return int(custom_target)
     bmr = calculate_bmr(weight, height, age, gender)
     activity_factors = {'低': 1.2, '中等': 1.375, '高': 1.55, '非常高': 1.725}
     tdee = bmr * activity_factors.get(activity_level, 1.375)
     if goal == '减脂':
-        return tdee - 300
+        return int(tdee - 300)
     elif goal == '增肌':
-        return tdee + 300
+        return int(tdee + 300)
     else:
-        return tdee
+        return int(tdee)
 
 # ==================== 加载食物运动数据 ====================
 @st.cache_data
@@ -340,7 +342,8 @@ if 'user_profile' not in st.session_state:
         'gender': '男',
         'age': 25,
         'activity_level': '中等',
-        'goal': '减脂'
+        'goal': '减脂',
+        'custom_target': None
     }
 
 if 'food_records' not in st.session_state:
@@ -376,7 +379,8 @@ def show_auth_modal():
                             'gender': profile.get('gender', '男'),
                             'age': profile.get('age', 25),
                             'activity_level': profile.get('activity_level', '中等'),
-                            'goal': profile.get('goal', '减脂')
+                            'goal': profile.get('goal', '减脂'),
+                            'custom_target': profile.get('daily_target')
                         }
                     today = get_current_date()
                     st.session_state.food_records = get_food_records(user['id'], today)
@@ -404,7 +408,6 @@ def show_auth_modal():
         
         col1, col2 = st.columns([2, 1])
         with col1:
-            # 显示冷却时间
             cooldown = st.session_state.code_cooldown
             if cooldown > 0:
                 st.caption(f"⏰ 请等待 {cooldown} 秒后重新获取")
@@ -412,7 +415,6 @@ def show_auth_modal():
                 st.caption("点击获取验证码")
         
         with col2:
-            # 获取验证码按钮（带冷却）
             if st.button("获取验证码", key="get_code_btn", use_container_width=True, disabled=(st.session_state.code_cooldown > 0)):
                 if reg_email:
                     user, msg = create_user(reg_email, reg_password, reg_username if reg_username else None)
@@ -437,7 +439,6 @@ def show_auth_modal():
             else:
                 success, msg = verify_email(reg_email, reg_code)
                 if success:
-                    # 自动登录
                     user_result = supabase.table("user_profiles").select("*").eq("email", reg_email).execute()
                     if user_result.data:
                         user = user_result.data[0]
@@ -451,7 +452,8 @@ def show_auth_modal():
                                 "gender": profile.get("gender", "男"),
                                 "age": profile.get("age", 25),
                                 "activity_level": profile.get("activity_level", "中等"),
-                                "goal": profile.get("goal", "减脂")
+                                "goal": profile.get("goal", "减脂"),
+                                "custom_target": profile.get("daily_target")
                             }
                         today = get_current_date()
                         st.session_state.food_records = get_food_records(user["id"], today)
@@ -468,7 +470,6 @@ def show_auth_modal():
         st.session_state.show_auth = False
         st.rerun()
 
-# 减少冷却时间的计数器（每次页面刷新减少）
 def update_cooldown():
     if st.session_state.code_cooldown > 0:
         st.session_state.code_cooldown -= 1
@@ -488,6 +489,17 @@ st.markdown("""
 }
 @media (max-width: 768px) {
     .stButton button { width: 100%; }
+}
+.checkmark {
+    color: #28a745;
+    font-size: 24px;
+}
+.cross {
+    color: #dc3545;
+    font-size: 24px;
+}
+.progress-ring {
+    position: relative;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -544,14 +556,15 @@ if st.session_state.user_id and st.session_state.get('show_email', False):
         total_cal = st.session_state.total_calories
         total_burn = st.session_state.total_burned
         user_prof = st.session_state.user_profile
-        daily_tar = int(get_daily_target(
+        daily_tar = get_daily_target_from_profile(
             user_prof.get('weight', 70),
             user_prof.get('height', 170),
             user_prof.get('age', 25),
             user_prof.get('gender', '男'),
             user_prof.get('activity_level', '中等'),
-            user_prof.get('goal', '减脂')
-        ))
+            user_prof.get('goal', '减脂'),
+            user_prof.get('custom_target')
+        )
         
         with st.expander("📋 报告预览"):
             st.write(f"📅 日期: {today_data}")
@@ -589,7 +602,7 @@ if st.session_state.user_id and st.session_state.get('show_email', False):
         
         st.markdown("---")
 
-# 个人信息编辑
+# 个人信息编辑（包含自定义每日目标）
 if st.session_state.user_id and st.session_state.get('show_profile', False):
     with st.expander("📝 编辑个人信息", expanded=True):
         col_p1, col_p2 = st.columns(2)
@@ -605,6 +618,16 @@ if st.session_state.user_id and st.session_state.get('show_profile', False):
         new_goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
                                index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
         
+        # 自定义每日目标
+        st.markdown("---")
+        st.markdown("#### 🎯 自定义每日目标")
+        use_custom = st.checkbox("使用自定义每日目标", value=st.session_state.user_profile.get('custom_target') is not None)
+        if use_custom:
+            custom_target = st.number_input("自定义每日热量目标 (kcal)", min_value=1000, max_value=5000, 
+                                            value=int(st.session_state.user_profile.get('custom_target', 2000)), step=50)
+        else:
+            custom_target = None
+        
         if st.button("💾 保存个人信息", use_container_width=True):
             st.session_state.user_profile = {
                 'weight': float(new_weight),
@@ -612,7 +635,8 @@ if st.session_state.user_id and st.session_state.get('show_profile', False):
                 'gender': new_gender,
                 'age': new_age,
                 'activity_level': new_activity,
-                'goal': new_goal
+                'goal': new_goal,
+                'custom_target': custom_target if use_custom else None
             }
             if st.session_state.user_id:
                 update_user_profile(st.session_state.user_id, st.session_state.user_profile)
@@ -639,10 +663,12 @@ user_gender = user_profile.get('gender', '男')
 user_age = int(user_profile.get('age', 25))
 user_activity = user_profile.get('activity_level', '中等')
 user_goal = user_profile.get('goal', '减脂')
+custom_target = user_profile.get('custom_target')
 
-daily_target = int(get_daily_target(user_weight, user_height, user_age, user_gender, user_activity, user_goal))
+daily_target = get_daily_target_from_profile(user_weight, user_height, user_age, user_gender, user_activity, user_goal, custom_target)
 remaining = daily_target - (total_calories - total_burned)
 
+# 显示统计卡片
 col_a, col_b, col_c, col_d = st.columns(4)
 col_a.metric("🎯 每日目标", f"{daily_target} kcal")
 col_b.metric("🍽️ 今日摄入", f"{total_calories:.0f} kcal")
@@ -652,6 +678,86 @@ if remaining > 0:
 else:
     col_d.metric("📊 超标", f"{-remaining:.0f} kcal")
 
+# 打卡进度条和打卡按钮
+st.markdown("---")
+st.markdown("### 🎯 今日打卡")
+
+col_progress, col_checkin = st.columns([3, 1])
+
+with col_progress:
+    # 进度条（基于净摄入 vs 目标）
+    if daily_target > 0:
+        # 净摄入 = 摄入 - 消耗
+        net = total_calories - total_burned
+        progress_percent = min(max(net / daily_target, 0), 1)
+        st.progress(progress_percent)
+        st.caption(f"净摄入: {net:.0f} / {daily_target} kcal ({progress_percent*100:.0f}%)")
+
+with col_checkin:
+    # 打卡按钮
+    today_str = get_current_date()
+    checkin_key = f"checkin_{today_str}"
+    
+    # 检查今天是否已打卡
+    checkin_record = supabase.table("checkin_records").select("*").eq("user_id", st.session_state.user_id).eq("date", today_str).execute() if st.session_state.user_id else None
+    is_checked_in = checkin_record and len(checkin_record.data) > 0 if st.session_state.user_id else False
+    
+    if is_checked_in:
+        st.success("✅ 已打卡")
+    else:
+        if st.button("📅 打卡", use_container_width=True, key=checkin_key):
+            if st.session_state.user_id:
+                # 记录打卡
+                try:
+                    supabase.table("checkin_records").insert({
+                        "user_id": st.session_state.user_id,
+                        "date": today_str,
+                        "net_calories": total_calories - total_burned,
+                        "created_at": datetime.now().isoformat()
+                    }).execute()
+                    st.success("✅ 打卡成功！继续坚持！")
+                    st.rerun()
+                except:
+                    st.error("打卡失败，请重试")
+            else:
+                st.info("💡 登录后可以打卡记录")
+
+# 打卡日历
+if st.session_state.user_id:
+    with st.expander("📅 打卡日历"):
+        # 获取最近30天打卡记录
+        start_date = (date.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+        end_date = date.today().strftime("%Y-%m-%d")
+        
+        checkins = supabase.table("checkin_records").select("*").eq("user_id", st.session_state.user_id).gte("date", start_date).lte("date", end_date).execute()
+        
+        if checkins.data:
+            checkin_dates = set(c['date'] for c in checkins.data)
+            
+            # 生成日历
+            cal_days = []
+            for i in range(30):
+                d = date.today() - timedelta(days=29 - i)
+                date_str = d.strftime("%Y-%m-%d")
+                is_checkin = date_str in checkin_dates
+                cal_days.append({"date": d.day, "month": d.month, "checkin": is_checkin, "full_date": date_str})
+            
+            # 显示日历（7列）
+            cols = st.columns(7)
+            for i, day in enumerate(cal_days):
+                col_idx = i % 7
+                with cols[col_idx]:
+                    if day['checkin']:
+                        st.markdown(f"<div style='text-align:center; padding:8px; background:#28a745; color:white; border-radius:8px; margin:2px;'>{day['date']}<br>✅</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"<div style='text-align:center; padding:8px; background:#f0f0f0; color:#999; border-radius:8px; margin:2px;'>{day['date']}<br>-</div>", unsafe_allow_html=True)
+            
+            # 统计
+            total_checkins = len(checkins.data)
+            st.caption(f"本月累计打卡: {total_checkins} 天")
+        else:
+            st.info("暂无打卡记录，开始打卡吧！")
+
 st.markdown("---")
 
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
@@ -660,10 +766,6 @@ col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 with col_left:
     st.markdown("### 👤 个人信息")
     st.info(f"📏 {int(user_height)}cm | ⚖️ {int(user_weight)}kg | 🎯 {user_goal}")
-    
-    progress = min(total_calories / daily_target, 1) if daily_target > 0 else 0
-    st.progress(progress)
-    st.caption(f"今日进度 {progress*100:.0f}%")
     
     if st.button("🗑️ 清空今日记录", use_container_width=True):
         st.session_state.food_records = []
@@ -679,7 +781,7 @@ with col_left:
                     delete_exercise_record(e['id'])
         st.rerun()
 
-# 中间：食物摄入
+# 中间：食物摄入（保持原有功能）
 with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动搜索", "📸 拍照识别"], horizontal=True)
@@ -771,7 +873,7 @@ with col_mid:
     else:
         st.info("暂无记录")
 
-# 右侧：运动消耗
+# 右侧：运动消耗（保持原有功能）
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 选择器材", "✏️ 自定义运动", "📸 拍照识别"], horizontal=True)
