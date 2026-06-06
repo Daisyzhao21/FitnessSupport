@@ -284,28 +284,6 @@ st.markdown("""
 @media (max-width: 768px) {
     .stButton button { width: 100%; }
 }
-/* 弹窗样式 */
-.popup-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.5);
-    z-index: 999;
-}
-.popup-content {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: white;
-    padding: 20px;
-    border-radius: 15px;
-    z-index: 1000;
-    max-width: 500px;
-    width: 90%;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -333,8 +311,9 @@ with col3:
         st.button("📈 趋势", disabled=True, use_container_width=True, key="trend_disabled")
 with col4:
     if st.session_state.user_id:
+        # 邮件按钮 - 点击后直接在同一区域显示表单
         if st.button("📧 报告", use_container_width=True, key="email_btn"):
-            st.session_state.show_email = True
+            st.session_state.show_email = not st.session_state.get('show_email', False)
     else:
         st.button("📧 报告", disabled=True, use_container_width=True, key="email_disabled")
 with col5:
@@ -343,6 +322,76 @@ with col5:
             st.session_state.user_id = None
             st.session_state.user_email = None
             st.rerun()
+
+# 邮件报告表单 - 直接在按钮下方显示（不滚动到底部）
+if st.session_state.user_id and st.session_state.get('show_email', False):
+    with st.container():
+        st.markdown("---")
+        st.markdown("#### 📧 发送每日报告")
+        
+        email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址", key="report_email")
+        
+        # 预览
+        with st.expander("📋 报告预览"):
+            today = get_current_date()
+            foods = st.session_state.food_records
+            exercises = st.session_state.exercise_records
+            total_calories = st.session_state.total_calories
+            total_burned = st.session_state.total_burned
+            user_profile = st.session_state.user_profile
+            daily_target = int(get_daily_target(
+                user_profile.get('weight', 70),
+                user_profile.get('height', 170),
+                user_profile.get('age', 25),
+                user_profile.get('gender', '男'),
+                user_profile.get('activity_level', '中等'),
+                user_profile.get('goal', '减脂')
+            ))
+            
+            st.write(f"📅 日期: {today}")
+            st.write(f"🍽️ 今日摄入: {total_calories:.0f} kcal")
+            st.write(f"🏋️ 今日消耗: {total_burned:.0f} kcal")
+            st.write(f"📊 净摄入: {total_calories - total_burned:.0f} kcal")
+            if foods:
+                st.write("**饮食记录:**")
+                for f in foods:
+                    st.write(f"  - {f['meal']}: {f['food_name']} ({f['quantity']}g) - {f['calories']:.0f}kcal")
+            if exercises:
+                st.write("**运动记录:**")
+                for e in exercises:
+                    st.write(f"  - {e['exercise_name']}: {e['duration']}分钟 - {e['calories']:.0f}kcal")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("📧 发送", type="primary", use_container_width=True, key="send_report_btn"):
+                if email_address:
+                    with st.spinner("正在发送..."):
+                        success, msg = send_daily_report_email(
+                            email_address,
+                            st.session_state.user_email,
+                            st.session_state.food_records,
+                            st.session_state.exercise_records,
+                            st.session_state.total_calories,
+                            st.session_state.total_burned,
+                            daily_target
+                        )
+                        if success:
+                            st.success(f"✅ {msg}")
+                            st.session_state.show_email = False
+                        else:
+                            st.error(f"❌ {msg}")
+                else:
+                    st.warning("请输入邮箱地址")
+        
+        with col_btn2:
+            if st.button("取消", use_container_width=True, key="cancel_email_btn"):
+                st.session_state.show_email = False
+                st.rerun()
+        
+        if not is_sendgrid_configured():
+            st.info("💡 邮件服务配置中，请联系管理员配置 SendGrid")
+        
+        st.markdown("---")
 
 # 登录弹窗
 if st.session_state.get('show_auth', False):
@@ -722,60 +771,6 @@ if st.session_state.get('show_trend', False) and st.session_state.user_id:
     if st.button("关闭", key="close_trend"):
         st.session_state.show_trend = False
         st.rerun()
-
-# ==================== 邮件发送弹窗（浮窗式）====================
-if st.session_state.get('show_email', False) and st.session_state.user_id:
-    with st.container():
-        st.markdown("---")
-        st.markdown("### 📧 发送每日报告")
-        st.markdown("将今日的饮食和运动记录发送到您的邮箱")
-        
-        email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址", key="report_email")
-        
-        with st.expander("📋 报告预览"):
-            st.write(f"📅 日期: {today}")
-            st.write(f"🍽️ 今日摄入: {total_calories:.0f} kcal")
-            st.write(f"🏋️ 今日消耗: {total_burned:.0f} kcal")
-            st.write(f"📊 净摄入: {total_calories - total_burned:.0f} kcal")
-            if foods:
-                st.write("**饮食记录:**")
-                for f in foods:
-                    st.write(f"  - {f['meal']}: {f['food_name']} ({f['quantity']}g) - {f['calories']:.0f}kcal")
-            if exercises:
-                st.write("**运动记录:**")
-                for e in exercises:
-                    st.write(f"  - {e['exercise_name']}: {e['duration']}分钟 - {e['calories']:.0f}kcal")
-        
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("📧 发送报告", type="primary", use_container_width=True, key="send_report"):
-                if email_address:
-                    with st.spinner("正在发送..."):
-                        success, msg = send_daily_report_email(
-                            email_address,
-                            st.session_state.user_email,
-                            foods,
-                            exercises,
-                            total_calories,
-                            total_burned,
-                            daily_target
-                        )
-                        if success:
-                            st.success(f"✅ {msg}")
-                        else:
-                            st.error(f"❌ {msg}")
-                else:
-                    st.warning("请输入邮箱地址")
-        
-        with col_btn2:
-            if st.button("关闭", use_container_width=True, key="close_email"):
-                st.session_state.show_email = False
-                st.rerun()
-        
-        if not is_sendgrid_configured():
-            st.info("💡 邮件服务配置中，请联系管理员配置 SendGrid")
-    
-    st.stop()
 
 st.markdown("---")
 st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存</p>", unsafe_allow_html=True)
