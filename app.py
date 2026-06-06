@@ -10,7 +10,6 @@ import hashlib
 
 from image_recognition import FoodImageRecognizer
 from email_service import send_daily_report_email, is_sendgrid_configured
-from email_verification import send_verification_email, send_reset_email, generate_code, generate_token
 
 st.set_page_config(page_title="健身营养助手", page_icon="💪", layout="wide")
 
@@ -33,32 +32,32 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# ==================== 密码加密 ====================
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+# ==================== 辅助函数 ====================
+def safe_float(value, default=70.0):
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except:
+        return default
 
-# ==================== 用户管理 ====================
-def create_user(email, password, username=None):
+def safe_int(value, default=25):
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except:
+        return default
+
+def get_or_create_user(email):
     result = supabase.table("user_profiles").select("*").eq("email", email).execute()
     if result.data:
-        return None, "邮箱已存在"
-    
-    final_username = username or email.split('@')[0]
-    username_check = supabase.table("user_profiles").select("*").eq("username", final_username).execute()
-    if username_check.data:
-        final_username = f"{final_username}_{uuid.uuid4().hex[:4]}"
-    
-    verification_code = generate_code()
-    expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
+        return result.data[0]
     
     new_user = {
         "id": str(uuid.uuid4()),
         "email": email,
-        "username": final_username,
-        "password": hash_password(password),
-        "email_verified": False,
-        "verification_code": verification_code,
-        "verification_code_expires": expires_at,
+        "username": email.split('@')[0],
         "weight": 70.0,
         "height": 170.0,
         "gender": "男",
@@ -69,82 +68,11 @@ def create_user(email, password, username=None):
     }
     try:
         insert_result = supabase.table("user_profiles").insert(new_user).execute()
-        send_verification_email(email, verification_code)
-        return insert_result.data[0], "注册成功，验证码已发送到邮箱"
+        return insert_result.data[0]
     except Exception as e:
-        return None, f"注册失败: {e}"
+        st.error(f"创建用户失败: {e}")
+        return None
 
-def verify_and_login(email, code):
-    """验证邮箱并自动登录"""
-    result = supabase.table("user_profiles").select("*").eq("email", email).execute()
-    if not result.data:
-        return None, False, "用户不存在"
-    
-    user = result.data[0]
-    if user.get('verification_code') == code:
-        expires = datetime.fromisoformat(user.get('verification_code_expires')) if user.get('verification_code_expires') else datetime.now() - timedelta(minutes=1)
-        if datetime.now() < expires:
-            supabase.table("user_profiles").update({"email_verified": True, "verification_code": None}).eq("email", email).execute()
-            # 获取最新用户信息并登录
-            updated_user = supabase.table("user_profiles").select("*").eq("email", email).execute()
-            return updated_user.data[0], True, "验证成功，正在登录..."
-        else:
-            return None, False, "验证码已过期"
-    else:
-        return None, False, "验证码错误"
-
-def login_user(email, password):
-    result = supabase.table("user_profiles").select("*").eq("email", email).execute()
-    if not result.data:
-        return None, "邮箱不存在"
-    
-    user = result.data[0]
-    if not user.get('email_verified'):
-        return None, "邮箱未验证，请查收验证邮件"
-    
-    if user.get('password') == hash_password(password):
-        return user, "登录成功"
-    else:
-        return None, "密码错误"
-
-def request_password_reset(email):
-    result = supabase.table("user_profiles").select("*").eq("email", email).execute()
-    if not result.data:
-        return False, "邮箱不存在"
-    
-    token = generate_token()
-    expires_at = (datetime.now() + timedelta(minutes=30)).isoformat()
-    
-    supabase.table("user_profiles").update({
-        "reset_token": token,
-        "reset_token_expires": expires_at
-    }).eq("email", email).execute()
-    
-    app_url = os.environ.get("APP_URL", "https://fitnessupport-xxxx.streamlit.app")
-    reset_link = f"{app_url}?reset_token={token}&email={email}"
-    
-    send_reset_email(email, reset_link)
-    return True, "密码重置邮件已发送"
-
-def reset_password(token, email, new_password):
-    result = supabase.table("user_profiles").select("*").eq("email", email).eq("reset_token", token).execute()
-    if not result.data:
-        return False, "无效的重置链接"
-    
-    user = result.data[0]
-    expires = datetime.fromisoformat(user.get('reset_token_expires')) if user.get('reset_token_expires') else datetime.now() - timedelta(minutes=1)
-    if datetime.now() > expires:
-        return False, "重置链接已过期"
-    
-    supabase.table("user_profiles").update({
-        "password": hash_password(new_password),
-        "reset_token": None,
-        "reset_token_expires": None
-    }).eq("email", email).execute()
-    
-    return True, "密码重置成功"
-
-# ==================== 其他函数（保持不变）====================
 def get_user_profile(user_id):
     try:
         result = supabase.table("user_profiles").select("*").eq("id", user_id).execute()
@@ -152,7 +80,7 @@ def get_user_profile(user_id):
             return result.data[0]
     except:
         pass
-    return None
+    return {'weight': 70.0, 'height': 170.0, 'gender': '男', 'age': 25, 'activity_level': '中等', 'goal': '减脂'}
 
 def update_user_profile(user_id, profile):
     try:
@@ -264,9 +192,9 @@ def get_trend_data(user_id, days=30):
         return [], []
 
 def calculate_bmr(weight, height, age, gender):
-    w = float(weight) if weight else 70
-    h = float(height) if height else 170
-    a = int(age) if age else 25
+    w = safe_float(weight, 70)
+    h = safe_float(height, 170)
+    a = safe_int(age, 25)
     if gender == '男':
         return 66 + (13.7 * w) + (5 * h) - (6.8 * a)
     else:
@@ -322,8 +250,6 @@ if 'show_email' not in st.session_state:
     st.session_state.show_email = False
 if 'show_auth' not in st.session_state:
     st.session_state.show_auth = False
-if 'show_reset' not in st.session_state:
-    st.session_state.show_reset = False
 
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = {
@@ -344,165 +270,6 @@ if 'total_calories' not in st.session_state:
 if 'total_burned' not in st.session_state:
     st.session_state.total_burned = 0
 
-# ==================== 登录/注册弹窗 ====================
-def show_auth_modal():
-    st.markdown("### 🔐 登录/注册")
-    
-    tab1, tab2 = st.tabs(["登录", "注册"])
-    
-    with tab1:
-        login_email = st.text_input("邮箱", key="login_email")
-        login_password = st.text_input("密码", type="password", key="login_password")
-        
-        if st.button("登录", type="primary", use_container_width=True, key="login_btn"):
-            if login_email and login_password:
-                user, msg = login_user(login_email, login_password)
-                if user:
-                    st.session_state.user_id = user['id']
-                    st.session_state.user_email = login_email
-                    profile = get_user_profile(user['id'])
-                    if profile:
-                        st.session_state.user_profile = {
-                            'weight': profile.get('weight', 70),
-                            'height': profile.get('height', 170),
-                            'gender': profile.get('gender', '男'),
-                            'age': profile.get('age', 25),
-                            'activity_level': profile.get('activity_level', '中等'),
-                            'goal': profile.get('goal', '减脂')
-                        }
-                    today = get_current_date()
-                    st.session_state.food_records = get_food_records(user['id'], today)
-                    st.session_state.exercise_records = get_exercise_records(user['id'], today)
-                    st.session_state.total_calories = sum(f.get('calories', 0) for f in st.session_state.food_records)
-                    st.session_state.total_burned = sum(e.get('calories', 0) for e in st.session_state.exercise_records)
-                    st.session_state.show_auth = False
-                    st.success("✅ 登录成功！")
-                    st.rerun()
-                else:
-                    st.error(msg)
-            else:
-                st.warning("请输入邮箱和密码")
-        
-        st.markdown("---")
-        if st.button("🔑 忘记密码？", use_container_width=True, key="forgot_btn"):
-            st.session_state.show_reset = True
-            st.rerun()
-    
-    with tab2:
-        reg_email = st.text_input("邮箱", key="reg_email")
-        reg_password = st.text_input("密码", type="password", key="reg_password")
-        reg_confirm = st.text_input("确认密码", type="password", key="reg_confirm")
-        reg_username = st.text_input("用户名（可选）", key="reg_username", placeholder="留空使用邮箱前缀")
-        reg_code = st.text_input("验证码", key="reg_code", placeholder="请输入邮箱验证码")
-        
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.caption("验证码将发送到您的邮箱")
-        with col2:
-            if st.button("获取验证码", key="get_code_btn", use_container_width=True):
-                if reg_email:
-                    user, msg = create_user(reg_email, reg_password, reg_username if reg_username else None)
-                    if user:
-                        st.success("验证码已发送，请查收邮件")
-                    else:
-                        st.error(msg)
-                else:
-                    st.warning("请输入邮箱")
-        
-        if st.button("注册", type="primary", use_container_width=True, key="register_btn"):
-            if not reg_email or not reg_password:
-                st.warning("请填写邮箱和密码")
-            elif reg_password != reg_confirm:
-                st.error("两次输入的密码不一致")
-            elif len(reg_password) < 4:
-                st.error("密码至少4位")
-            elif not reg_code:
-                st.warning("请输入验证码")
-            else:
-                # 验证并自动登录
-                user, success, msg = verify_and_login(reg_email, reg_code)
-                if success and user:
-                    st.query_params.clear()
-                    st.query_params.clear()
-                    st.session_state.user_id = user['id']
-                    st.session_state.user_email = reg_email
-                    profile = user
-                    st.session_state.user_profile = {
-                        'weight': profile.get('weight', 70),
-                        'height': profile.get('height', 170),
-                        'gender': profile.get('gender', '男'),
-                        'age': profile.get('age', 25),
-                        'activity_level': profile.get('activity_level', '中等'),
-                        'goal': profile.get('goal', '减脂')
-                    }
-                    today = get_current_date()
-                    st.session_state.food_records = get_food_records(user['id'], today)
-                    st.session_state.exercise_records = get_exercise_records(user['id'], today)
-                    st.session_state.total_calories = sum(f.get('calories', 0) for f in st.session_state.food_records)
-                    st.session_state.total_burned = sum(e.get('calories', 0) for e in st.session_state.exercise_records)
-                    st.session_state.show_auth = False
-                    st.success("✅ 注册成功！已自动登录")
-                    st.rerun()
-                else:
-                    st.error(msg)
-    
-    if st.button("继续试用", use_container_width=True, key="continue_btn"):
-        st.session_state.show_auth = False
-        st.rerun()
-
-# ==================== 忘记密码弹窗 ====================
-def show_reset_modal():
-    st.markdown("### 🔑 重置密码")
-    st.markdown("请输入您的注册邮箱，我们将发送重置链接到您的邮箱")
-    
-    reset_email = st.text_input("注册邮箱", key="reset_email_input")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("发送重置链接", type="primary", use_container_width=True):
-            if reset_email:
-                success, msg = request_password_reset(reset_email)
-                if success:
-                    st.success(msg)
-                else:
-                    st.error(msg)
-            else:
-                st.warning("请输入邮箱")
-    
-    with col2:
-        if st.button("返回登录", use_container_width=True):
-            st.session_state.show_reset = False
-            st.rerun()
-    
-    if st.button("关闭", use_container_width=True):
-        st.session_state.show_reset = False
-        st.rerun()
-
-# 处理密码重置链接
-query_params = st.query_params
-if 'reset_token' in query_params and 'email' in query_params:
-    token = query_params['reset_token']
-    email = query_params['email']
-    st.markdown("### 🔐 重置密码")
-    new_password = st.text_input("新密码", type="password")
-    confirm_password = st.text_input("确认新密码", type="password")
-    if st.button("重置密码"):
-        if not new_password:
-            st.warning("请输入新密码")
-        elif new_password != confirm_password:
-            st.error("两次输入的密码不一致")
-        elif len(new_password) < 4:
-            st.error("密码至少4位")
-        else:
-            success, msg = reset_password(token, email, new_password)
-            if success:
-                st.success(msg + "，请登录")
-                st.session_state.show_auth = True
-                st.rerun()
-            else:
-                st.error(msg)
-    st.stop()
-
 # ==================== UI ====================
 st.markdown("""
 <style>
@@ -516,6 +283,28 @@ st.markdown("""
 }
 @media (max-width: 768px) {
     .stButton button { width: 100%; }
+}
+/* 弹窗样式 */
+.popup-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 999;
+}
+.popup-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 20px;
+    border-radius: 15px;
+    z-index: 1000;
+    max-width: 500px;
+    width: 90%;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -557,15 +346,77 @@ with col5:
 
 # 登录弹窗
 if st.session_state.get('show_auth', False):
-    show_auth_modal()
+    st.markdown("### 🔐 登录/注册")
+    st.info("💡 输入邮箱即可自动登录/注册")
+    
+    email = st.text_input("邮箱地址", key="login_email")
+    if st.button("登录 / 注册", type="primary", use_container_width=True):
+        if email:
+            user = get_or_create_user(email)
+            if user:
+                st.session_state.user_id = user['id']
+                st.session_state.user_email = email
+                profile = get_user_profile(user['id'])
+                if profile:
+                    st.session_state.user_profile = {
+                        'weight': profile.get('weight', 70),
+                        'height': profile.get('height', 170),
+                        'gender': profile.get('gender', '男'),
+                        'age': profile.get('age', 25),
+                        'activity_level': profile.get('activity_level', '中等'),
+                        'goal': profile.get('goal', '减脂')
+                    }
+                today = get_current_date()
+                st.session_state.food_records = get_food_records(user['id'], today)
+                st.session_state.exercise_records = get_exercise_records(user['id'], today)
+                st.session_state.total_calories = sum(f.get('calories', 0) for f in st.session_state.food_records)
+                st.session_state.total_burned = sum(e.get('calories', 0) for e in st.session_state.exercise_records)
+                st.success("✅ 登录成功！")
+                st.rerun()
+        else:
+            st.warning("请输入邮箱")
+    
+    if st.button("继续试用", use_container_width=True, key="continue_btn"):
+        st.session_state.show_auth = False
+        st.rerun()
     st.stop()
 
-# 忘记密码弹窗
-if st.session_state.get('show_reset', False):
-    show_reset_modal()
-    st.stop()
+# 个人信息编辑
+if st.session_state.user_id and st.session_state.get('show_profile', False):
+    with st.expander("📝 编辑个人信息", expanded=True):
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            new_gender = st.selectbox("性别", ["男", "女"], index=0 if st.session_state.user_profile['gender'] == '男' else 1)
+            new_age = st.number_input("年龄", 15, 100, st.session_state.user_profile['age'])
+        with col_p2:
+            new_height = st.number_input("身高(cm)", 100, 250, int(st.session_state.user_profile['height']))
+            new_weight = st.number_input("体重(kg)", 30, 200, int(st.session_state.user_profile['weight']))
+        
+        new_activity = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
+                                    index=["低", "中等", "高", "非常高"].index(st.session_state.user_profile['activity_level']))
+        new_goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
+                               index=["减脂", "保持体重", "增肌"].index(st.session_state.user_profile['goal']))
+        
+        if st.button("💾 保存个人信息", use_container_width=True):
+            st.session_state.user_profile = {
+                'weight': float(new_weight),
+                'height': float(new_height),
+                'gender': new_gender,
+                'age': new_age,
+                'activity_level': new_activity,
+                'goal': new_goal
+            }
+            if st.session_state.user_id:
+                update_user_profile(st.session_state.user_id, st.session_state.user_profile)
+            st.success("✅ 已保存")
+            st.session_state.show_profile = False
+            st.rerun()
+        
+        if st.button("关闭", use_container_width=True):
+            st.session_state.show_profile = False
+            st.rerun()
 
-# ==================== 主界面（简化，保持原有功能）====================
+# 获取今日数据
 today = get_current_date()
 foods = st.session_state.food_records
 exercises = st.session_state.exercise_records
@@ -574,20 +425,20 @@ total_calories = st.session_state.total_calories
 total_burned = st.session_state.total_burned
 
 user_profile = st.session_state.user_profile
-user_weight = float(user_profile.get('weight', 70))
-user_height = float(user_profile.get('height', 170))
+user_weight = safe_float(user_profile.get('weight', 70))
+user_height = safe_float(user_profile.get('height', 170))
 user_gender = user_profile.get('gender', '男')
-user_age = int(user_profile.get('age', 25))
+user_age = safe_int(user_profile.get('age', 25))
 user_activity = user_profile.get('activity_level', '中等')
 user_goal = user_profile.get('goal', '减脂')
 
 daily_target = int(get_daily_target(user_weight, user_height, user_age, user_gender, user_activity, user_goal))
+remaining = daily_target - (total_calories - total_burned)
 
 col_a, col_b, col_c, col_d = st.columns(4)
 col_a.metric("🎯 每日目标", f"{daily_target} kcal")
 col_b.metric("🍽️ 今日摄入", f"{total_calories:.0f} kcal")
 col_c.metric("🏋️ 今日消耗", f"{total_burned:.0f} kcal")
-remaining = daily_target - (total_calories - total_burned)
 if remaining > 0:
     col_d.metric("📊 剩余", f"{remaining:.0f} kcal")
 else:
@@ -597,41 +448,16 @@ st.markdown("---")
 
 col_left, col_mid, col_right = st.columns([1, 1.5, 1.3])
 
-# 左侧：个人信息
+# ==================== 左侧：个人信息 ====================
 with col_left:
     st.markdown("### 👤 个人信息")
-    
-    col_w1, col_w2 = st.columns(2)
-    with col_w1:
-        new_weight = st.number_input("体重(kg)", 30, 200, int(user_weight), key="edit_weight")
-        new_height = st.number_input("身高(cm)", 100, 250, int(user_height), key="edit_height")
-        new_age = st.number_input("年龄", 15, 100, user_age, key="edit_age")
-    with col_w2:
-        new_gender = st.selectbox("性别", ["男", "女"], index=0 if user_gender == '男' else 1, key="edit_gender")
-        new_activity = st.selectbox("活动水平", ["低", "中等", "高", "非常高"], 
-                                    index=["低", "中等", "高", "非常高"].index(user_activity), key="edit_activity")
-        new_goal = st.selectbox("健身目标", ["减脂", "保持体重", "增肌"],
-                               index=["减脂", "保持体重", "增肌"].index(user_goal), key="edit_goal")
-    
-    if st.button("💾 保存个人信息", use_container_width=True, key="save_profile"):
-        st.session_state.user_profile = {
-            'weight': float(new_weight),
-            'height': float(new_height),
-            'gender': new_gender,
-            'age': new_age,
-            'activity_level': new_activity,
-            'goal': new_goal
-        }
-        if st.session_state.user_id:
-            update_user_profile(st.session_state.user_id, st.session_state.user_profile)
-        st.success("✅ 已保存")
-        st.rerun()
+    st.info(f"📏 {int(user_height)}cm | ⚖️ {int(user_weight)}kg | 🎯 {user_goal}")
     
     progress = min(total_calories / daily_target, 1) if daily_target > 0 else 0
     st.progress(progress)
     st.caption(f"今日进度 {progress*100:.0f}%")
     
-    if st.button("🗑️ 清空今日记录", use_container_width=True, key="clear_records"):
+    if st.button("🗑️ 清空今日记录", use_container_width=True):
         st.session_state.food_records = []
         st.session_state.exercise_records = []
         st.session_state.total_calories = 0
@@ -645,7 +471,7 @@ with col_left:
                     delete_exercise_record(e['id'])
         st.rerun()
 
-# 中间：食物摄入
+# ==================== 中间：食物摄入 ====================
 with col_mid:
     st.markdown("## 🍽️ 食物摄入")
     mode = st.radio("方式", ["🔍 手动搜索", "📸 拍照识别"], horizontal=True)
@@ -655,6 +481,8 @@ with col_mid:
         term = st.text_input("🔍 搜索食物", placeholder="鸡胸肉、鸡蛋、米饭...")
         if term:
             results = df_food[df_food['名称'].str.contains(term, na=False)].head(8)
+            if len(results) == 0:
+                st.warning(f"未找到 '{term}'")
             for idx, row in results.iterrows():
                 unit = row.get('单位', 'g') if pd.notna(row.get('单位')) else 'g'
                 config = UNIT_CONFIG.get(unit, UNIT_CONFIG['g'])
@@ -735,7 +563,7 @@ with col_mid:
     else:
         st.info("暂无记录")
 
-# 右侧：运动消耗
+# ==================== 右侧：运动消耗 ====================
 with col_right:
     st.markdown("## 🏋️ 运动消耗")
     mode_ex = st.radio("方式", ["🔍 选择器材", "✏️ 自定义运动", "📸 拍照识别"], horizontal=True)
@@ -895,55 +723,59 @@ if st.session_state.get('show_trend', False) and st.session_state.user_id:
         st.session_state.show_trend = False
         st.rerun()
 
-# ==================== 邮件发送弹窗 ====================
+# ==================== 邮件发送弹窗（浮窗式）====================
 if st.session_state.get('show_email', False) and st.session_state.user_id:
-    st.markdown("---")
-    st.markdown("## 📧 发送每日报告")
+    with st.container():
+        st.markdown("---")
+        st.markdown("### 📧 发送每日报告")
+        st.markdown("将今日的饮食和运动记录发送到您的邮箱")
+        
+        email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址", key="report_email")
+        
+        with st.expander("📋 报告预览"):
+            st.write(f"📅 日期: {today}")
+            st.write(f"🍽️ 今日摄入: {total_calories:.0f} kcal")
+            st.write(f"🏋️ 今日消耗: {total_burned:.0f} kcal")
+            st.write(f"📊 净摄入: {total_calories - total_burned:.0f} kcal")
+            if foods:
+                st.write("**饮食记录:**")
+                for f in foods:
+                    st.write(f"  - {f['meal']}: {f['food_name']} ({f['quantity']}g) - {f['calories']:.0f}kcal")
+            if exercises:
+                st.write("**运动记录:**")
+                for e in exercises:
+                    st.write(f"  - {e['exercise_name']}: {e['duration']}分钟 - {e['calories']:.0f}kcal")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("📧 发送报告", type="primary", use_container_width=True, key="send_report"):
+                if email_address:
+                    with st.spinner("正在发送..."):
+                        success, msg = send_daily_report_email(
+                            email_address,
+                            st.session_state.user_email,
+                            foods,
+                            exercises,
+                            total_calories,
+                            total_burned,
+                            daily_target
+                        )
+                        if success:
+                            st.success(f"✅ {msg}")
+                        else:
+                            st.error(f"❌ {msg}")
+                else:
+                    st.warning("请输入邮箱地址")
+        
+        with col_btn2:
+            if st.button("关闭", use_container_width=True, key="close_email"):
+                st.session_state.show_email = False
+                st.rerun()
+        
+        if not is_sendgrid_configured():
+            st.info("💡 邮件服务配置中，请联系管理员配置 SendGrid")
     
-    email_address = st.text_input("收件邮箱", value=st.session_state.get('user_email', ''), placeholder="输入邮箱地址", key="report_email")
-    
-    with st.expander("📋 报告预览"):
-        st.write(f"📅 日期: {today}")
-        st.write(f"🍽️ 今日摄入: {total_calories:.0f} kcal")
-        st.write(f"🏋️ 今日消耗: {total_burned:.0f} kcal")
-        st.write(f"📊 净摄入: {total_calories - total_burned:.0f} kcal")
-        if foods:
-            st.write("**饮食记录:**")
-            for f in foods:
-                st.write(f"  - {f['meal']}: {f['food_name']} ({f['quantity']}g) - {f['calories']:.0f}kcal")
-        if exercises:
-            st.write("**运动记录:**")
-            for e in exercises:
-                st.write(f"  - {e['exercise_name']}: {e['duration']}分钟 - {e['calories']:.0f}kcal")
-    
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("📧 发送报告", type="primary", use_container_width=True, key="send_report"):
-            if email_address:
-                with st.spinner("正在发送..."):
-                    success, msg = send_daily_report_email(
-                        email_address,
-                        st.session_state.user_email,
-                        foods,
-                        exercises,
-                        total_calories,
-                        total_burned,
-                        daily_target
-                    )
-                    if success:
-                        st.success(f"✅ {msg}")
-                    else:
-                        st.error(f"❌ {msg}")
-            else:
-                st.warning("请输入邮箱地址")
-    
-    with col_btn2:
-        if st.button("关闭", use_container_width=True, key="close_email"):
-            st.session_state.show_email = False
-            st.rerun()
-    
-    if not is_sendgrid_configured():
-        st.info("💡 邮件服务配置中，请联系管理员配置 SendGrid")
+    st.stop()
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 数据本地保存 | 🔐 登录后云端同步</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray'>🔍 搜索 | 📸 拍照 | 🏋️ 运动 | ✏️ 自定义 | 💾 云端保存</p>", unsafe_allow_html=True)
