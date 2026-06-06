@@ -362,11 +362,31 @@ def show_auth_modal():
         reg_username = st.text_input("用户名（可选）", key="reg_username", placeholder="留空使用邮箱前缀")
         reg_code = st.text_input("验证码", key="reg_code", placeholder="请输入邮箱验证码")
         
+        
         col1, col2 = st.columns([2, 1])
         with col1:
-            st.caption("验证码将发送到您的邮箱")
+            # 显示冷却时间
+            if st.session_state.last_code_sent:
+                elapsed = time.time() - st.session_state.last_code_sent
+                if elapsed < 60:
+                    st.caption(f"⏰ 请等待 {60 - int(elapsed)} 秒后重新获取")
+                else:
+                    st.caption("✅ 可以获取验证码")
+            else:
+                st.caption("点击获取验证码")
+        
         with col2:
-            if st.button("获取验证码", key="get_code_btn", use_container_width=True):
+            button_disabled = st.session_state.last_code_sent and (time.time() - st.session_state.last_code_sent) < 60
+            if st.button("获取验证码", key="get_code_btn", use_container_width=True, disabled=button_disabled):
+                if reg_email:
+                    success, msg = send_verification_code(reg_email)
+                    if success:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+                else:
+                    st.warning("请输入邮箱")
+:
                 if reg_email:
                     user, msg = create_user(reg_email, reg_password, reg_username if reg_username else None)
                     if user:
